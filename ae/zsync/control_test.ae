@@ -1,0 +1,62 @@
+// SPDX-FileCopyrightText: 2004,2005,2007,2009,2025,2026 Colin Phipps <cph@moria.org.uk>
+// SPDX-License-Identifier: Artistic-2.0
+//
+// Parity test for control.ae against a REAL .zsync produced by the Go
+// zsyncmake (/tmp/ctltest.dat + .zsync, blocksize 1024, 5000 bytes,
+// Hash-Lengths 1,2,5, SHA-1 d209ae71...). Parses headers + the binary
+// checksum table, then proves end-to-end reconstruction: feeding the
+// original file as the seed must match all 5 blocks (todo->0) and the
+// reconstructed output must have the recorded SHA-1.
+
+import std.string (*)
+import std.fs
+import std.cryptography
+import zsync.control
+import rcksum.rcksum
+import rcksum.fileio
+import test.assert
+
+main() {
+    println("=== control parse + reconstruct (real .zsync) ===")
+    h = assert.new()
+
+    // read the .zsync control file (binary-safe)
+    zbytes, zlen, zerr = fs.read_binary("/tmp/ctltest.dat.zsync")
+    assert.eq_str(h, zerr, "", "read .zsync: no error")
+    assert.ok(h, zlen > 0, ".zsync non-empty")
+
+    c = control.parse(zbytes, zlen)
+    assert.eq_int(h, control.ctl_ok(c), 1, "parse ok")
+    if control.ctl_ok(c) == 0 {
+        println("parse error: ${control.ctl_err(c)}")
+    }
+    assert.eq_int(h, control.ctl_filelen(c), 5000, "Length=5000")
+    assert.eq_int(h, control.ctl_blocksize(c), 1024, "Blocksize=1024")
+    assert.eq_int(h, control.ctl_blocks(c), 5, "blocks=5 (ceil 5000/1024)")
+    assert.eq_str(h, control.ctl_filename(c), "ctltest.dat", "Filename")
+    assert.eq_str(h, control.ctl_checksum(c), "f5d0ac38bfdafcbc2bfe68aad7af017c6b8ad946", "SHA-1 header")
+
+    // reconstruct: feed the ORIGINAL file as the seed -> all blocks match
+    rs = control.ctl_rs(c)
+    fd = fileio.open_rw("/tmp/zsync_ctl_out.bin")
+    assert.ok(h, fd >= 0, "output opened")
+    rcksum.set_target_fd_p(rs, fd)
+
+    seed, slen, serr = fs.read_binary("/tmp/ctltest.dat")
+    assert.eq_str(h, serr, "", "read seed: no error")
+    rcksum.submit_source_buffer_p(rs, seed, slen)
+
+    todo = rcksum.blocks_todo_p(rs)
+    assert.eq_int(h, todo, 0, "all 5 blocks matched from original-as-seed")
+
+    // truncate to true length, read back, verify SHA-1
+    fileio.truncate_to(fd, 5000)
+    fileio.sync_fd(fd)
+    out, on = fileio.read_at(fd, 5000, 0)
+    assert.eq_int(h, on, 5000, "output is 5000 bytes")
+    sha, e = cryptography.sha1_hex(out, on)
+    assert.eq_str(h, sha, "f5d0ac38bfdafcbc2bfe68aad7af017c6b8ad946", "reconstructed SHA-1 matches")
+
+    fileio.close_fd(fd)
+    assert.report(h)
+}

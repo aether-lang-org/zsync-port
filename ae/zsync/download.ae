@@ -1,0 +1,171 @@
+// SPDX-FileCopyrightText: 2004,2005,2007,2009,2025,2026 Colin Phipps <cph@moria.org.uk>
+// SPDX-License-Identifier: Artistic-2.0
+//
+// Port of internal/zsync/state.go — the high-level download state that
+// wraps a parsed control file + rcksum engine and drives reconstruction:
+// seed submission, needed byte ranges, target-data submission, status,
+// progress, and final SHA-1 verification.
+
+import std.string (*)
+import std.list (*)
+import std.cryptography
+import zsync.control
+import rcksum.rcksum
+import rcksum.fileio
+
+extern malloc(size: int) -> ptr
+
+struct State {
+    ctl: ptr          // *Control
+    rs: ptr           // *RcksumState (== ctl.rs)
+    filelen: int
+    blocks: int
+    blocksize: int
+    fd: int           // output file descriptor
+}
+
+// A byte range [start, fin] of the target file.
+struct ByteRange {
+    start: int
+    fin: int
+}
+
+br_start(b: *ByteRange) -> int { return b.start }
+br_fin(b: *ByteRange) -> int { return b.fin }
+
+// Accessors over a needed-byte-ranges list (list of *ByteRange).
+br_count(l: ptr) -> int {
+    return list_size(l)
+}
+
+br_at_start(l: ptr, i: int) -> int {
+    b = list_get_raw(l, i) as *ByteRange
+    return b.start
+}
+
+br_at_fin(l: ptr, i: int) -> int {
+    b = list_get_raw(l, i) as *ByteRange
+    return b.fin
+}
+
+// Build State from already-parsed control + an opened output fd.
+new_state(ctl: ptr, fd: int) -> *State {
+    raw = malloc(48)
+    s = raw as *State
+    s.ctl = ctl
+    s.rs = control.ctl_rs(ctl)
+    s.filelen = control.ctl_filelen(ctl)
+    s.blocks = control.ctl_blocks(ctl)
+    s.blocksize = control.ctl_blocksize(ctl)
+    s.fd = fd
+    rcksum.set_target_fd_p(s.rs, fd)
+    return s
+}
+
+// Status: 0 = nothing matched, 1 = partial, 2 = complete.
+status(s: *State) -> int {
+    todo = rcksum.blocks_todo_p(s.rs)
+    if todo == s.blocks {
+        return 0
+    }
+    if todo > 0 {
+        return 1
+    }
+    return 2
+}
+
+// Progress: (got_bytes, total_bytes).
+progress(s: *State) -> (int, int) {
+    todo = rcksum.blocks_todo_p(s.rs)
+    got = (s.blocks - todo) * s.blocksize
+    total = s.blocks * s.blocksize
+    return got, total
+}
+
+// Submit an in-memory seed buffer.
+submit_source(s: *State, data: string, data_len: int) {
+    rcksum.submit_source_buffer_p(s.rs, data, data_len)
+}
+
+// NeededByteRanges: byte ranges of the target still missing. Returns a
+// std.list of *ByteRange.
+needed_byte_ranges(s: *State) -> ptr {
+    block_ranges = rcksum.needed_block_ranges_p(s.rs)
+    out = list_new()
+    n = rcksum.ranges_list_len(block_ranges)
+    i = 0
+    while i < n {
+        bstart = rcksum.ranges_list_start(block_ranges, i)
+        bend = rcksum.ranges_list_fin(block_ranges, i)
+        rstart = bstart * s.blocksize
+        rend = (bend + 1) * s.blocksize - 1
+        if rend >= s.filelen {
+            rend = s.filelen - 1
+        }
+        br = malloc(16) as *ByteRange
+        br.start = rstart
+        br.fin = rend
+        list_add_raw(out, br)
+        i = i + 1
+    }
+    return out
+}
+
+// SubmitTargetData: accept downloaded bytes for the target at `offset`
+// (must be block-aligned). Splits into full blocks; the short last block
+// is zero-padded. Returns bytes accepted.
+submit_target_data(s: *State, offset: int, data: string, data_len: int) -> int {
+    received = 0
+    id = offset / s.blocksize
+    pos = 0
+    while pos + s.blocksize <= data_len {
+        block = fileio.slice(data, data_len, pos, s.blocksize)
+        rcksum.submit_blocks_p(s.rs, block, s.blocksize, id, id)
+        received = received + s.blocksize
+        pos = pos + s.blocksize
+        id = id + 1
+    }
+    // Short trailing block (only valid for the file's last block): pad
+    // with zeros to a full block, as rcksum expects.
+    if pos < data_len {
+        rem = data_len - pos
+        if id == s.blocks - 1 {
+            padded = fileio.pad_block(data, data_len, pos, rem, s.blocksize)
+            rcksum.submit_blocks_p(s.rs, padded, s.blocksize, id, id)
+            received = received + rem
+        }
+    }
+    return received
+}
+
+// Complete: verify the reconstruction is whole, truncate to the true
+// length, and (if a SHA-1 was given) verify it. Returns "" on success,
+// an error string otherwise.
+complete(s: *State) -> string {
+    if rcksum.blocks_todo_p(s.rs) > 0 {
+        return "file is not complete"
+    }
+    fileio.truncate_to(s.fd, s.filelen)
+    fileio.sync_fd(s.fd)
+
+    want = control.ctl_checksum(s.ctl)
+    if want == "" {
+        return ""
+    }
+    out, n = fileio.read_at(s.fd, s.filelen, 0)
+    if n != s.filelen {
+        return "failed to read back file for verification"
+    }
+    got, e = cryptography.sha1_hex(out, n)
+    if e != "" {
+        return "sha1 failed"
+    }
+    if string_equals(lower(got), lower(want)) == 1 {
+        return ""
+    }
+    return "checksum mismatch"
+}
+
+lower(s: string) -> string {
+    return string_to_lower(s)
+}

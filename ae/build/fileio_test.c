@@ -466,10 +466,10 @@ void zsync_buf_free(void*);
 // Extern C function: zsync_buf_identity
 const char* zsync_buf_identity(void*);
 
-// Extern C function: malloc (libc-provided, declaration skipped)
-// Extern C function: zsync_buf_identity
-const char* zsync_buf_identity(void*);
+// Extern C function: zsync_dup16
+const char* zsync_dup16(void*);
 
+// Extern C function: malloc (libc-provided, declaration skipped)
 
 // Import: std.string
 // Import: rcksum.fileio

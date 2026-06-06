@@ -186,18 +186,48 @@ static inline void* _aether_ctx_get(void) { return _aether_ctx_depth > 0 ? _aeth
 void aether_args_init(int argc, char** argv);
 
 
+typedef struct { const char* _0; int _1; const char* _2; } _tuple_string_int_string;
+typedef struct { int _0; int _1; const char* _2; } _tuple_int_int_string;
 typedef struct { const char* _0; int _1; } _tuple_string_int;
 typedef struct { const char* _0; const char* _1; } _tuple_string_string;
-typedef struct { const char* _0; int _1; const char* _2; } _tuple_string_int_string;
+typedef struct { int _0; int _1; int _2; int _3; } _tuple_int_int_int_int;
 
+typedef struct Control Control;
 typedef struct IntCell IntCell;
 typedef struct HashEntry HashEntry;
 typedef struct Stats Stats;
 typedef struct RcksumState RcksumState;
-typedef struct RSum RSum;
 typedef struct Harness Harness;
+typedef struct RSum RSum;
 typedef struct BlockPair BlockPair;
 typedef struct BlockRanges BlockRanges;
+typedef struct Control {
+    void* rs;
+    int filelen;
+    int blocks;
+    int blocksize;
+    const char* checksum;
+    const char* checksum_method;
+    const char* filename;
+    const char* mtime;
+    void* urls;
+    int ok;
+    const char* err;
+    int _heap_checksum;
+    int _heap_checksum_method;
+    int _heap_filename;
+    int _heap_mtime;
+    int _heap_err;
+} Control;
+static inline void Control_destroy(Control* s) {
+    if (!s) return;
+    if (s->_heap_checksum) { aether_heap_str_free(s->checksum); s->checksum = (const char*)0; s->_heap_checksum = 0; }
+    if (s->_heap_checksum_method) { aether_heap_str_free(s->checksum_method); s->checksum_method = (const char*)0; s->_heap_checksum_method = 0; }
+    if (s->_heap_filename) { aether_heap_str_free(s->filename); s->filename = (const char*)0; s->_heap_filename = 0; }
+    if (s->_heap_mtime) { aether_heap_str_free(s->mtime); s->mtime = (const char*)0; s->_heap_mtime = 0; }
+    if (s->_heap_err) { aether_heap_str_free(s->err); s->err = (const char*)0; s->_heap_err = 0; }
+}
+
 typedef struct IntCell {
     int v;
 } IntCell;
@@ -243,15 +273,15 @@ typedef struct RcksumState {
     int fd;
 } RcksumState;
 
-typedef struct RSum {
-    int a;
-    int b;
-} RSum;
-
 typedef struct Harness {
     int passed;
     int failed;
 } Harness;
+
+typedef struct RSum {
+    int a;
+    int b;
+} RSum;
 
 typedef struct BlockPair {
     int start;
@@ -263,11 +293,45 @@ typedef struct BlockRanges {
     int got_blocks;
 } BlockRanges;
 
+#define fs_KIND_OK (0)
+#define fs_KIND_NOT_FOUND (1)
+#define fs_KIND_PERMISSION_DENIED (2)
+#define fs_KIND_EXISTS (3)
+#define fs_KIND_CROSS_DEVICE (4)
+#define fs_KIND_IO (5)
+#define fs_KIND_INVALID (6)
+#define fs_KIND_LOOP (7)
+#define fs_KIND_NAME_TOO_LONG (8)
+#define fs_KIND_NO_SPACE (9)
+#define fs_KIND_IS_DIR (10)
+#define fs_KIND_NOT_DIR (11)
+#define fs_KIND_UNAVAILABLE (99)
 // Forward declarations
-void add_block(void*, int, const char*);
 static _tuple_string_int string_strip_prefix(const char*, const char*);
+static const char* fs_mkdir_p(const char*);
+static _tuple_string_int_string fs_read_binary(const char*);
+static _tuple_string_string cryptography_sha1_hex(const char*, int);
 static _tuple_string_string cryptography_base64_encode_padded(const char*, int);
 static _tuple_string_int_string cryptography_md4_bytes(const char*, int);
+static void* control_ctl_rs(Control*);
+static int control_ctl_filelen(Control*);
+static int control_ctl_blocks(Control*);
+static int control_ctl_blocksize(Control*);
+static const char* control_ctl_checksum(Control*);
+static const char* control_ctl_filename(Control*);
+static int control_ctl_ok(Control*);
+static const char* control_ctl_err(Control*);
+static Control* control_fail(Control*, const char*);
+static int control_be_decode(const char*, int, int, int);
+static int control_is_pow2(int);
+static Control* control_parse(const char*, int);
+static const char* control_pad_md4(const char*, int, int, int);
+static const char* control_substr(const char*, int, int);
+static int control_index_byte(const char*, int, int, int);
+static int control_find_sep(const char*);
+static int control_parse_int(const char*);
+static _tuple_int_int_int_int control_parse_hash_lengths(const char*);
+static int control_parse_int_p(void*);
 static int rcksum_NO_BLOCK(void);
 static int rcksum_BITHASH_BITS(void);
 static void* rcksum_box_int(int);
@@ -276,6 +340,7 @@ static HashEntry* rcksum_entry_at(RcksumState*, int);
 static HashEntry* rcksum_new_entry(void);
 static RcksumState* rcksum_new(int, int, int, int, int);
 static void rcksum_set_target_fd(RcksumState*, int);
+static void* rcksum_state_as_ptr(RcksumState*);
 static void rcksum_set_target_fd_p(void*, int);
 static int rcksum_blocks_todo_p(void*);
 static int rcksum_submit_source_buffer_p(void*, const char*, int);
@@ -303,16 +368,6 @@ static int rcksum_submit_source_buffer(RcksumState*, const char*, int);
 static const char* rcksum_make_zeros(int);
 static const char* rcksum_append_bytes(const char*, int, const char*, int);
 static _tuple_string_int rcksum_read_known_data(RcksumState*, int, int);
-static RSum* checksums_new_rsum(int, int);
-static void* checksums_rsum_as_ptr(RSum*);
-static int checksums_rsum_a(RSum*);
-static int checksums_rsum_b(RSum*);
-static RSum* checksums_calc_rsum_block(const char*, int, int, int);
-static void checksums_update_rsum(RSum*, int, int, int);
-static const char* checksums_calc_checksum(const char*, int);
-static int checksums_byte_at(const char*, int, int);
-static int checksums_calc_rhash_from_rsums(RSum*, RSum*, int, int);
-static int checksums_log2(int);
 static int fileio_open_rw(const char*);
 static int fileio_write_at(int, const char*, int, int);
 static _tuple_string_int fileio_read_at(int, int, int);
@@ -327,11 +382,22 @@ static void fileio_buf_or(void*, int, int);
 static const char* fileio_buf_to_str(void*, int);
 static const char* fileio_slice(const char*, int, int, int);
 static const char* fileio_buf_as_string(void*);
+static const char* fileio_dup16(void*);
 static Harness* assert_new(void);
 static void assert_ok(Harness*, int, const char*);
 static void assert_eq_int(Harness*, int, int, const char*);
 static void assert_eq_str(Harness*, const char*, const char*, const char*);
 static void assert_report(Harness*);
+static RSum* checksums_new_rsum(int, int);
+static void* checksums_rsum_as_ptr(RSum*);
+static int checksums_rsum_a(RSum*);
+static int checksums_rsum_b(RSum*);
+static RSum* checksums_calc_rsum_block(const char*, int, int, int);
+static void checksums_update_rsum(RSum*, int, int, int);
+static const char* checksums_calc_checksum(const char*, int);
+static int checksums_byte_at(const char*, int, int);
+static int checksums_calc_rhash_from_rsums(RSum*, RSum*, int, int);
+static int checksums_log2(int);
 static BlockPair* ranges_new_pair(int, int);
 static int ranges_pair_start(BlockPair*);
 static int ranges_pair_fin(BlockPair*);
@@ -562,6 +628,153 @@ void* string_format_list(const char*, void*);
 // Extern C function: string_glob_match_raw
 int string_glob_match_raw(const char*, const char*, int);
 
+// Extern C function: file_open_raw
+void* file_open_raw(const char*, const char*);
+
+// Extern C function: file_close
+int file_close(void*);
+
+// Extern C function: file_read_all_raw
+const char* file_read_all_raw(void*);
+
+// Extern C function: file_write_raw
+int file_write_raw(void*, const char*, int);
+
+// Extern C function: file_exists
+int file_exists(const char*);
+
+// Extern C function: fs_path_exists
+int fs_path_exists(const char*);
+
+// Extern C function: file_delete_raw
+int file_delete_raw(const char*);
+
+// Extern C function: file_size_raw
+int file_size_raw(const char*);
+
+// Extern C function: file_mtime
+int file_mtime(const char*);
+
+// Extern C function: file_mtime_raw
+int file_mtime_raw(const char*);
+
+// Extern C function: dir_exists
+int dir_exists(const char*);
+
+// Extern C function: dir_create_raw
+int dir_create_raw(const char*);
+
+// Extern C function: dir_create_mode_raw
+int dir_create_mode_raw(const char*, int);
+
+// Extern C function: dir_delete_raw
+int dir_delete_raw(const char*);
+
+// Extern C function: dir_list_raw
+void* dir_list_raw(const char*);
+
+// Extern C function: fs_mkdir_p_raw
+int fs_mkdir_p_raw(const char*);
+
+// Extern C function: fs_symlink_raw
+int fs_symlink_raw(const char*, const char*);
+
+// Extern C function: fs_readlink_raw
+const char* fs_readlink_raw(const char*);
+
+// Extern C function: fs_is_symlink
+int fs_is_symlink(const char*);
+
+// Extern C function: fs_unlink_raw
+int fs_unlink_raw(const char*);
+
+// Extern C function: fs_write_binary_raw
+int fs_write_binary_raw(const char*, const char*, int);
+
+// Extern C function: fs_write_atomic_raw
+int fs_write_atomic_raw(const char*, const char*, int);
+
+// Extern C function: fs_rename_raw
+int fs_rename_raw(const char*, const char*);
+
+// Extern C function: fs_try_stat
+int fs_try_stat(const char*);
+
+// Extern C function: fs_get_stat_kind
+int fs_get_stat_kind(void);
+
+// Extern C function: fs_get_stat_size
+int fs_get_stat_size(void);
+
+// Extern C function: fs_get_stat_mtime
+int fs_get_stat_mtime(void);
+
+// Extern C function: fs_try_read_binary
+int fs_try_read_binary(const char*);
+
+// Extern C function: fs_get_read_binary
+const char* fs_get_read_binary(void);
+
+// Extern C function: fs_get_read_binary_length
+int fs_get_read_binary_length(void);
+
+// Extern C function: fs_release_read_binary
+void fs_release_read_binary(void);
+
+// Extern C function: fs_read_binary_tuple
+_tuple_string_int_string fs_read_binary_tuple(const char*);
+
+// Extern C function: fs_copy_raw
+_tuple_int_int_string fs_copy_raw(const char*, const char*);
+
+// Extern C function: fs_move_raw
+_tuple_int_int_string fs_move_raw(const char*, const char*);
+
+// Extern C function: fs_realpath_raw
+_tuple_string_int_string fs_realpath_raw(const char*);
+
+// Extern C function: fs_chmod_raw
+_tuple_int_int_string fs_chmod_raw(const char*, int);
+
+// Extern C function: dir_list_count
+int dir_list_count(void*);
+
+// Extern C function: dir_list_get
+const char* dir_list_get(void*, int);
+
+// Extern C function: dir_list_free
+void dir_list_free(void*);
+
+// Extern C function: path_join
+const char* path_join(const char*, const char*);
+
+// Extern C function: path_dirname
+const char* path_dirname(const char*);
+
+// Extern C function: path_basename
+const char* path_basename(const char*);
+
+// Extern C function: path_extension
+const char* path_extension(const char*);
+
+// Extern C function: path_is_absolute
+int path_is_absolute(const char*);
+
+// Extern C function: fs_glob_raw
+void* fs_glob_raw(const char*);
+
+// Extern C function: fs_glob_multi_raw
+void* fs_glob_multi_raw(void*);
+
+// Extern C function: string_concat
+const char* string_concat(const char*, const char*);
+
+// Extern C function: string_length
+int string_length(const char*);
+
+// Extern C function: string_new_with_length
+void* string_new_with_length(const char*, int);
+
 // Extern C function: cryptography_sha1_hex_raw
 const char* cryptography_sha1_hex_raw(const char*, int);
 
@@ -633,7 +846,6 @@ void* string_new_with_length(const char*, int);
 
 // Extern C function: malloc (libc-provided, declaration skipped)
 // Extern C function: malloc (libc-provided, declaration skipped)
-// Extern C function: free (libc-provided, declaration skipped)
 // Extern C function: malloc (libc-provided, declaration skipped)
 // Extern C function: zsync_io_open_rw_trunc
 int zsync_io_open_rw_trunc(const char*);
@@ -711,6 +923,8 @@ void list_clear(void*);
 // Extern C function: list_free
 void list_free(void*);
 
+// Extern C function: malloc (libc-provided, declaration skipped)
+// Extern C function: free (libc-provided, declaration skipped)
 // Extern C function: map_new
 void* map_new(void);
 
@@ -747,24 +961,12 @@ void map_keys_free(void*);
 // Extern C function: malloc (libc-provided, declaration skipped)
 
 // Import: std.string
+// Import: std.fs
 // Import: std.cryptography
+// Import: zsync.control
 // Import: rcksum.rcksum
-// Import: rcksum.checksums
 // Import: rcksum.fileio
 // Import: test.assert
-#line 21 "rcksum/rcksum_test.ae"
-void add_block(void* z, int i, const char* blk) {
-    int _heap_md = 0; (void)_heap_md;
-    const char* md = NULL;
-#line 22 "rcksum/rcksum_test.ae"
-RSum* r = checksums_calc_rsum_block(blk, 8, 0, 8);
-#line 23 "rcksum/rcksum_test.ae"
-{ const char* _tmp_old = md; md = checksums_calc_checksum(blk, 8); if (_heap_md) aether_heap_str_free(_tmp_old); _heap_md = 0; }
-#line 24 "rcksum/rcksum_test.ae"
-rcksum_add_target_block(z, i, checksums_rsum_a(r), checksums_rsum_b(r), md);
-    /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
-}
-
 #line 363 "/home/paul/scm/aether/build/../std/string/module.ae"
 static _tuple_string_int string_strip_prefix(const char* s, const char* prefix) {
 if (string_starts_with(s, prefix) != 1) {
@@ -779,6 +981,42 @@ int prefix_len = string_length(prefix);
 int s_len = string_length(s);
 #line 369 "/home/paul/scm/aether/build/../std/string/module.ae"
     return (_tuple_string_int){aether_uniform_heap_str((const char*)(string_substring(s, prefix_len, s_len)), 1), 1};
+}
+
+#line 365 "/home/paul/scm/aether/build/../std/fs/module.ae"
+static const char* fs_mkdir_p(const char* path) {
+#line 366 "/home/paul/scm/aether/build/../std/fs/module.ae"
+int ok = fs_mkdir_p_raw(aether_string_data(path));
+if (ok == 0) {
+        {
+#line 368 "/home/paul/scm/aether/build/../std/fs/module.ae"
+            return "cannot mkdir -p";
+        }
+    }
+#line 370 "/home/paul/scm/aether/build/../std/fs/module.ae"
+    return "";
+}
+
+#line 515 "/home/paul/scm/aether/build/../std/fs/module.ae"
+static _tuple_string_int_string fs_read_binary(const char* path) {
+#line 521 "/home/paul/scm/aether/build/../std/fs/module.ae"
+    return fs_read_binary_tuple(aether_string_data(path));
+}
+
+#line 72 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+static _tuple_string_string cryptography_sha1_hex(const char* data, int length) {
+    int _heap_out = 0; (void)_heap_out;
+    const char* out = NULL;
+#line 73 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+{ const char* _tmp_old = out; out = cryptography_sha1_hex_raw(aether_string_data(data), length); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 0; }
+if (out == 0) {
+        {
+#line 75 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+            return (_tuple_string_string){aether_uniform_heap_str((const char*)(""), 0), "openssl unavailable"};
+        }
+    }
+#line 77 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+    return (_tuple_string_string){aether_uniform_heap_str((const char*)(out), _heap_out), ""};
 }
 
 #line 143 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
@@ -826,6 +1064,583 @@ cryptography_release_binary_digest();
     /* deferred */ if (_heap_raw) { aether_heap_str_free(raw); raw = NULL; _heap_raw = 0; }
     return _builder_ret;
     /* deferred */ if (_heap_raw) { aether_heap_str_free(raw); raw = NULL; _heap_raw = 0; }
+}
+
+#line 31 "zsync/control.ae"
+static void* control_ctl_rs(Control* c) {
+    return c->rs;
+}
+
+#line 32 "zsync/control.ae"
+static int control_ctl_filelen(Control* c) {
+    return c->filelen;
+}
+
+#line 33 "zsync/control.ae"
+static int control_ctl_blocks(Control* c) {
+    return c->blocks;
+}
+
+#line 34 "zsync/control.ae"
+static int control_ctl_blocksize(Control* c) {
+    return c->blocksize;
+}
+
+#line 35 "zsync/control.ae"
+static const char* control_ctl_checksum(Control* c) {
+    return c->checksum;
+}
+
+#line 36 "zsync/control.ae"
+static const char* control_ctl_filename(Control* c) {
+    return c->filename;
+}
+
+#line 39 "zsync/control.ae"
+static int control_ctl_ok(Control* c) {
+    return c->ok;
+}
+
+#line 40 "zsync/control.ae"
+static const char* control_ctl_err(Control* c) {
+    return c->err;
+}
+
+#line 42 "zsync/control.ae"
+static Control* control_fail(Control* c, const char* msg) {
+#line 43 "zsync/control.ae"
+(c->ok = 0);
+#line 44 "zsync/control.ae"
+(c->err = msg);
+#line 45 "zsync/control.ae"
+    return c;
+}
+
+#line 49 "zsync/control.ae"
+static int control_be_decode(const char* data, int data_len, int off, int n) {
+#line 50 "zsync/control.ae"
+int v = 0;
+#line 51 "zsync/control.ae"
+int i = 0;
+while (i < n) {
+        {
+#line 53 "zsync/control.ae"
+v = ((v << 8) | (string_char_at_n(data, data_len, (off + i)) & 0xff));
+#line 54 "zsync/control.ae"
+i = (i + 1);
+        }
+    }
+#line 56 "zsync/control.ae"
+    return v;
+}
+
+#line 60 "zsync/control.ae"
+static int control_is_pow2(int x) {
+if (x == 0) {
+        {
+#line 62 "zsync/control.ae"
+            return 0;
+        }
+    }
+if ((x & (x - 1)) == 0) {
+        {
+#line 65 "zsync/control.ae"
+            return 1;
+        }
+    }
+#line 67 "zsync/control.ae"
+    return 0;
+}
+
+#line 71 "zsync/control.ae"
+static Control* control_parse(const char* data, int data_len) {
+    int _heap_line = 0; (void)_heap_line;
+    const char* line = NULL;
+    int _heap_key = 0; (void)_heap_key;
+    const char* key = NULL;
+    int _heap_value = 0; (void)_heap_value;
+    const char* value = NULL;
+    int _heap_md = 0; (void)_heap_md;
+    const char* md = NULL;
+#line 72 "zsync/control.ae"
+void* raw = malloc(96);
+#line 73 "zsync/control.ae"
+Control* c = ((Control*)(raw));
+#line 74 "zsync/control.ae"
+(c->filelen = 0);
+#line 75 "zsync/control.ae"
+(c->blocks = 0);
+#line 76 "zsync/control.ae"
+(c->blocksize = 0);
+#line 77 "zsync/control.ae"
+(c->checksum = "");
+#line 78 "zsync/control.ae"
+(c->checksum_method = "");
+#line 79 "zsync/control.ae"
+(c->filename = "");
+#line 80 "zsync/control.ae"
+(c->mtime = "");
+#line 81 "zsync/control.ae"
+(c->urls = list_new());
+#line 82 "zsync/control.ae"
+(c->ok = 0);
+#line 83 "zsync/control.ae"
+(c->err = "");
+#line 85 "zsync/control.ae"
+int checksum_bytes = 16;
+#line 86 "zsync/control.ae"
+int rsum_bytes = 4;
+#line 87 "zsync/control.ae"
+int seq_matches = 1;
+#line 90 "zsync/control.ae"
+int pos = 0;
+#line 91 "zsync/control.ae"
+int header_end = 0;
+    int nl;
+    int line_len;
+    int sep;
+while (pos < data_len) {
+        {
+#line 94 "zsync/control.ae"
+nl = control_index_byte(data, data_len, pos, 10);
+if (nl < 0) {
+                {
+#line 96 "zsync/control.ae"
+                    Control* _builder_ret = control_fail(c, "control file: unterminated header");
+                    /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+                    /* deferred */ if (_heap_key) { aether_heap_str_free(key); key = NULL; _heap_key = 0; }
+                    /* deferred */ if (_heap_line) { aether_heap_str_free(line); line = NULL; _heap_line = 0; }
+                    return _builder_ret;
+                }
+            }
+#line 98 "zsync/control.ae"
+line_len = (nl - pos);
+if (line_len == 0) {
+                {
+#line 100 "zsync/control.ae"
+header_end = (nl + 1);
+#line 101 "zsync/control.ae"
+pos = data_len;
+                }
+            } else {
+                {
+#line 103 "zsync/control.ae"
+{ const char* _tmp_old = line; line = control_substr(data, pos, nl); if (_heap_line) aether_heap_str_free(_tmp_old); _heap_line = 1; }
+#line 105 "zsync/control.ae"
+sep = control_find_sep(line);
+if (sep < 0) {
+                        {
+#line 107 "zsync/control.ae"
+                            Control* _builder_ret = control_fail(c, "bad line");
+                            /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+                            /* deferred */ if (_heap_key) { aether_heap_str_free(key); key = NULL; _heap_key = 0; }
+                            /* deferred */ if (_heap_line) { aether_heap_str_free(line); line = NULL; _heap_line = 0; }
+                            return _builder_ret;
+                        }
+                    }
+#line 109 "zsync/control.ae"
+{ const char* _tmp_old = key; key = string_substring(line, 0, sep); if (_heap_key) aether_heap_str_free(_tmp_old); _heap_key = 1; }
+#line 110 "zsync/control.ae"
+value = string_substring(line, (sep + 2), string_length(line));
+if (string_equals(key, "zsync") == 1) {
+                        {
+if (string_equals(value, "0.0.4") == 1) {
+                                {
+#line 114 "zsync/control.ae"
+                                    Control* _builder_ret = control_fail(c, "not compatible with zsync 0.0.4");
+                                    /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+                                    /* deferred */ if (_heap_key) { aether_heap_str_free(key); key = NULL; _heap_key = 0; }
+                                    /* deferred */ if (_heap_line) { aether_heap_str_free(line); line = NULL; _heap_line = 0; }
+                                    return _builder_ret;
+                                }
+                            }
+                        }
+                    } else {
+if (string_equals(key, "Min-Version") == 1) {
+                            {
+                            }
+                        } else {
+if (string_equals(key, "Length") == 1) {
+                                {
+#line 119 "zsync/control.ae"
+(c->filelen = control_parse_int(value));
+                                }
+                            } else {
+if (string_equals(key, "Filename") == 1) {
+                                    {
+#line 121 "zsync/control.ae"
+(c->filename = value);
+                                    }
+                                } else {
+if (string_equals(key, "URL") == 1) {
+                                        {
+#line 123 "zsync/control.ae"
+list_add_string_owned(c->urls, (void*)value);
+                                        }
+                                    } else {
+if (string_equals(key, "Blocksize") == 1) {
+                                            {
+#line 125 "zsync/control.ae"
+(c->blocksize = control_parse_int(value));
+if (control_is_pow2(c->blocksize) == 0) {
+                                                    {
+#line 127 "zsync/control.ae"
+                                                        Control* _builder_ret = control_fail(c, "nonsensical blocksize");
+                                                        /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+                                                        /* deferred */ if (_heap_key) { aether_heap_str_free(key); key = NULL; _heap_key = 0; }
+                                                        /* deferred */ if (_heap_line) { aether_heap_str_free(line); line = NULL; _heap_line = 0; }
+                                                        return _builder_ret;
+                                                    }
+                                                }
+                                            }
+                                        } else {
+if (string_equals(key, "Hash-Lengths") == 1) {
+                                                {
+#line 130 "zsync/control.ae"
+                                                    _tuple_int_int_int_int _tup0 = control_parse_hash_lengths(value);
+                                                    int sm = _tup0._0;
+                                                    int rb = _tup0._1;
+                                                    int cb = _tup0._2;
+                                                    int ok = _tup0._3;
+if (ok == 0) {
+                                                        {
+#line 132 "zsync/control.ae"
+                                                            Control* _builder_ret = control_fail(c, "bad hash lengths");
+                                                            /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+                                                            /* deferred */ if (_heap_key) { aether_heap_str_free(key); key = NULL; _heap_key = 0; }
+                                                            /* deferred */ if (_heap_line) { aether_heap_str_free(line); line = NULL; _heap_line = 0; }
+                                                            return _builder_ret;
+                                                        }
+                                                    }
+#line 134 "zsync/control.ae"
+seq_matches = sm;
+#line 135 "zsync/control.ae"
+rsum_bytes = rb;
+#line 136 "zsync/control.ae"
+checksum_bytes = cb;
+if (rsum_bytes < 1) {
+                                                        {
+#line 138 "zsync/control.ae"
+                                                            Control* _builder_ret = control_fail(c, "nonsensical hash lengths");
+                                                            /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+                                                            /* deferred */ if (_heap_key) { aether_heap_str_free(key); key = NULL; _heap_key = 0; }
+                                                            /* deferred */ if (_heap_line) { aether_heap_str_free(line); line = NULL; _heap_line = 0; }
+                                                            return _builder_ret;
+                                                        }
+                                                    }
+if (rsum_bytes > 4) {
+                                                        {
+#line 141 "zsync/control.ae"
+                                                            Control* _builder_ret = control_fail(c, "nonsensical hash lengths");
+                                                            /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+                                                            /* deferred */ if (_heap_key) { aether_heap_str_free(key); key = NULL; _heap_key = 0; }
+                                                            /* deferred */ if (_heap_line) { aether_heap_str_free(line); line = NULL; _heap_line = 0; }
+                                                            return _builder_ret;
+                                                        }
+                                                    }
+if (checksum_bytes < 3) {
+                                                        {
+#line 144 "zsync/control.ae"
+                                                            Control* _builder_ret = control_fail(c, "nonsensical hash lengths");
+                                                            /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+                                                            /* deferred */ if (_heap_key) { aether_heap_str_free(key); key = NULL; _heap_key = 0; }
+                                                            /* deferred */ if (_heap_line) { aether_heap_str_free(line); line = NULL; _heap_line = 0; }
+                                                            return _builder_ret;
+                                                        }
+                                                    }
+if (checksum_bytes > 16) {
+                                                        {
+#line 147 "zsync/control.ae"
+                                                            Control* _builder_ret = control_fail(c, "nonsensical hash lengths");
+                                                            /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+                                                            /* deferred */ if (_heap_key) { aether_heap_str_free(key); key = NULL; _heap_key = 0; }
+                                                            /* deferred */ if (_heap_line) { aether_heap_str_free(line); line = NULL; _heap_line = 0; }
+                                                            return _builder_ret;
+                                                        }
+                                                    }
+if (seq_matches < 1) {
+                                                        {
+#line 150 "zsync/control.ae"
+                                                            Control* _builder_ret = control_fail(c, "nonsensical hash lengths");
+                                                            /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+                                                            /* deferred */ if (_heap_key) { aether_heap_str_free(key); key = NULL; _heap_key = 0; }
+                                                            /* deferred */ if (_heap_line) { aether_heap_str_free(line); line = NULL; _heap_line = 0; }
+                                                            return _builder_ret;
+                                                        }
+                                                    }
+if (seq_matches > 2) {
+                                                        {
+#line 153 "zsync/control.ae"
+                                                            Control* _builder_ret = control_fail(c, "nonsensical hash lengths");
+                                                            /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+                                                            /* deferred */ if (_heap_key) { aether_heap_str_free(key); key = NULL; _heap_key = 0; }
+                                                            /* deferred */ if (_heap_line) { aether_heap_str_free(line); line = NULL; _heap_line = 0; }
+                                                            return _builder_ret;
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+if (string_equals(key, "SHA-1") == 1) {
+                                                    {
+if (string_length(value) != 40) {
+                                                            {
+#line 157 "zsync/control.ae"
+                                                                Control* _builder_ret = control_fail(c, "SHA-1 digest wrong length");
+                                                                /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+                                                                /* deferred */ if (_heap_key) { aether_heap_str_free(key); key = NULL; _heap_key = 0; }
+                                                                /* deferred */ if (_heap_line) { aether_heap_str_free(line); line = NULL; _heap_line = 0; }
+                                                                return _builder_ret;
+                                                            }
+                                                        }
+#line 159 "zsync/control.ae"
+(c->checksum = value);
+#line 160 "zsync/control.ae"
+(c->checksum_method = "SHA-1");
+                                                    }
+                                                } else {
+if (string_equals(key, "MTime") == 1) {
+                                                        {
+#line 162 "zsync/control.ae"
+(c->mtime = value);
+                                                        }
+                                                    } else {
+if (string_equals(key, "Safe") == 1) {
+                                                            {
+                                                            }
+                                                        } else {
+                                                            {
+#line 166 "zsync/control.ae"
+                                                                Control* _builder_ret = control_fail(c, "unknown header");
+                                                                /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+                                                                /* deferred */ if (_heap_key) { aether_heap_str_free(key); key = NULL; _heap_key = 0; }
+                                                                /* deferred */ if (_heap_line) { aether_heap_str_free(line); line = NULL; _heap_line = 0; }
+                                                                return _builder_ret;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+#line 168 "zsync/control.ae"
+pos = (nl + 1);
+                }
+            }
+        }
+    }
+if (c->filelen != 0) {
+        {
+if (c->blocksize != 0) {
+                {
+#line 174 "zsync/control.ae"
+(c->blocks = (((c->filelen + c->blocksize) - 1) / c->blocksize));
+                }
+            }
+        }
+    }
+if (c->filelen == 0) {
+        {
+#line 178 "zsync/control.ae"
+            Control* _builder_ret = control_fail(c, "not a zsync file");
+            /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+            /* deferred */ if (_heap_key) { aether_heap_str_free(key); key = NULL; _heap_key = 0; }
+            /* deferred */ if (_heap_line) { aether_heap_str_free(line); line = NULL; _heap_line = 0; }
+            return _builder_ret;
+        }
+    }
+if (c->blocksize == 0) {
+        {
+#line 181 "zsync/control.ae"
+            Control* _builder_ret = control_fail(c, "not a zsync file");
+            /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+            /* deferred */ if (_heap_key) { aether_heap_str_free(key); key = NULL; _heap_key = 0; }
+            /* deferred */ if (_heap_line) { aether_heap_str_free(line); line = NULL; _heap_line = 0; }
+            return _builder_ret;
+        }
+    }
+#line 184 "zsync/control.ae"
+RcksumState* rs = rcksum_new(c->blocks, c->blocksize, rsum_bytes, checksum_bytes, seq_matches);
+#line 185 "zsync/control.ae"
+(c->rs = rcksum_state_as_ptr(rs));
+#line 188 "zsync/control.ae"
+int bp = header_end;
+#line 189 "zsync/control.ae"
+int i = 0;
+    int rsum_val;
+    int a;
+    int b;
+while (i < c->blocks) {
+        {
+if (((bp + rsum_bytes) + checksum_bytes) > data_len) {
+                {
+#line 192 "zsync/control.ae"
+                    Control* _builder_ret = control_fail(c, "control file truncated in checksum table");
+                    /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+                    /* deferred */ if (_heap_key) { aether_heap_str_free(key); key = NULL; _heap_key = 0; }
+                    /* deferred */ if (_heap_line) { aether_heap_str_free(line); line = NULL; _heap_line = 0; }
+                    return _builder_ret;
+                }
+            }
+#line 197 "zsync/control.ae"
+rsum_val = control_be_decode(data, data_len, bp, rsum_bytes);
+#line 198 "zsync/control.ae"
+a = ((rsum_val >> 16) & 0xffff);
+#line 199 "zsync/control.ae"
+b = (rsum_val & 0xffff);
+#line 200 "zsync/control.ae"
+bp = (bp + rsum_bytes);
+#line 203 "zsync/control.ae"
+{ const char* _tmp_old = md; md = control_pad_md4(data, data_len, bp, checksum_bytes); if (_heap_md) aether_heap_str_free(_tmp_old); _heap_md = 0; }
+#line 204 "zsync/control.ae"
+bp = (bp + checksum_bytes);
+#line 206 "zsync/control.ae"
+rcksum_add_target_block(rs, i, a, b, md);
+#line 207 "zsync/control.ae"
+i = (i + 1);
+        }
+    }
+#line 210 "zsync/control.ae"
+(c->ok = 1);
+#line 211 "zsync/control.ae"
+    Control* _builder_ret = c;
+    /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+    /* deferred */ if (_heap_key) { aether_heap_str_free(key); key = NULL; _heap_key = 0; }
+    /* deferred */ if (_heap_line) { aether_heap_str_free(line); line = NULL; _heap_line = 0; }
+    return _builder_ret;
+    /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+    /* deferred */ if (_heap_key) { aether_heap_str_free(key); key = NULL; _heap_key = 0; }
+    /* deferred */ if (_heap_line) { aether_heap_str_free(line); line = NULL; _heap_line = 0; }
+}
+
+#line 217 "zsync/control.ae"
+static const char* control_pad_md4(const char* data, int data_len, int off, int n) {
+#line 218 "zsync/control.ae"
+void* b = fileio_buf_alloc(16);
+#line 219 "zsync/control.ae"
+int i = 0;
+while (i < 16) {
+        {
+if (i < n) {
+                {
+#line 222 "zsync/control.ae"
+fileio_buf_set(b, i, (string_char_at_n(data, data_len, (off + i)) & 0xff));
+                }
+            }
+#line 224 "zsync/control.ae"
+i = (i + 1);
+        }
+    }
+#line 230 "zsync/control.ae"
+    return fileio_dup16(b);
+}
+
+#line 235 "zsync/control.ae"
+static const char* control_substr(const char* s, int start, int fin) {
+#line 236 "zsync/control.ae"
+    return aether_uniform_heap_str((const char*)(string_substring(s, start, fin)), 1);
+}
+
+#line 240 "zsync/control.ae"
+static int control_index_byte(const char* data, int data_len, int from, int target) {
+#line 241 "zsync/control.ae"
+int i = from;
+while (i < data_len) {
+        {
+if ((string_char_at_n(data, data_len, i) & 0xff) == target) {
+                {
+#line 244 "zsync/control.ae"
+                    return i;
+                }
+            }
+#line 246 "zsync/control.ae"
+i = (i + 1);
+        }
+    }
+#line 248 "zsync/control.ae"
+    return -1;
+}
+
+#line 252 "zsync/control.ae"
+static int control_find_sep(const char* line) {
+#line 253 "zsync/control.ae"
+int n = string_length(line);
+#line 254 "zsync/control.ae"
+int i = 0;
+while (i < (n - 1)) {
+        {
+if ((string_char_at(line, i) & 0xff) == 58) {
+                {
+if ((string_char_at(line, (i + 1)) & 0xff) == 32) {
+                        {
+#line 258 "zsync/control.ae"
+                            return i;
+                        }
+                    }
+                }
+            }
+#line 261 "zsync/control.ae"
+i = (i + 1);
+        }
+    }
+#line 263 "zsync/control.ae"
+    return -1;
+}
+
+#line 266 "zsync/control.ae"
+static int control_parse_int(const char* s) {
+#line 267 "zsync/control.ae"
+int ok = string_try_long(s);
+if (ok == 0) {
+        {
+#line 269 "zsync/control.ae"
+            return 0;
+        }
+    }
+#line 271 "zsync/control.ae"
+    return string_get_long(s);
+}
+
+#line 275 "zsync/control.ae"
+static _tuple_int_int_int_int control_parse_hash_lengths(const char* value) {
+#line 276 "zsync/control.ae"
+void* parts = string_split(value, ",");
+if (string_array_size(parts) != 3) {
+        {
+#line 278 "zsync/control.ae"
+            return (_tuple_int_int_int_int){0, 0, 0, 0};
+        }
+    }
+#line 280 "zsync/control.ae"
+void* p0 = string_array_get(parts, 0);
+#line 281 "zsync/control.ae"
+void* p1 = string_array_get(parts, 1);
+#line 282 "zsync/control.ae"
+void* p2 = string_array_get(parts, 2);
+#line 283 "zsync/control.ae"
+int sm = control_parse_int_p(p0);
+#line 284 "zsync/control.ae"
+int rb = control_parse_int_p(p1);
+#line 285 "zsync/control.ae"
+int cb = control_parse_int_p(p2);
+#line 286 "zsync/control.ae"
+    return (_tuple_int_int_int_int){sm, rb, cb, 1};
+}
+
+#line 291 "zsync/control.ae"
+static int control_parse_int_p(void* p) {
+    int _heap_s = 0; (void)_heap_s;
+    const char* s = NULL;
+#line 292 "zsync/control.ae"
+{ const char* _tmp_old = s; s = string_concat(fileio_buf_as_string(p), ""); if (_heap_s) aether_heap_str_free(_tmp_old); _heap_s = 1; }
+#line 293 "zsync/control.ae"
+    int _builder_ret = control_parse_int(s);
+    /* deferred */ if (_heap_s) { aether_heap_str_free(s); s = NULL; _heap_s = 0; }
+    return _builder_ret;
+    /* deferred */ if (_heap_s) { aether_heap_str_free(s); s = NULL; _heap_s = 0; }
 }
 
 #line 31 "rcksum/rcksum.ae"
@@ -974,6 +1789,12 @@ Stats* st = ((Stats*)(sraw));
 static void rcksum_set_target_fd(RcksumState* z, int fd) {
 #line 166 "rcksum/rcksum.ae"
 (z->fd = fd);
+}
+
+#line 171 "rcksum/rcksum.ae"
+static void* rcksum_state_as_ptr(RcksumState* z) {
+#line 172 "rcksum/rcksum.ae"
+    return z;
 }
 
 #line 178 "rcksum/rcksum.ae"
@@ -1830,147 +2651,6 @@ if (z->fd < 0) {
     return fileio_read_at(z->fd, len, offset);
 }
 
-#line 32 "rcksum/checksums.ae"
-static RSum* checksums_new_rsum(int a, int b) {
-#line 33 "rcksum/checksums.ae"
-void* raw = malloc(16);
-#line 34 "rcksum/checksums.ae"
-RSum* r = ((RSum*)(raw));
-#line 35 "rcksum/checksums.ae"
-(r->a = (a & 0xffff));
-#line 36 "rcksum/checksums.ae"
-(r->b = (b & 0xffff));
-#line 37 "rcksum/checksums.ae"
-    return r;
-}
-
-#line 42 "rcksum/checksums.ae"
-static void* checksums_rsum_as_ptr(RSum* r) {
-#line 43 "rcksum/checksums.ae"
-    return r;
-}
-
-#line 46 "rcksum/checksums.ae"
-static int checksums_rsum_a(RSum* r) {
-#line 47 "rcksum/checksums.ae"
-    return r->a;
-}
-
-#line 50 "rcksum/checksums.ae"
-static int checksums_rsum_b(RSum* r) {
-#line 51 "rcksum/checksums.ae"
-    return r->b;
-}
-
-#line 58 "rcksum/checksums.ae"
-static RSum* checksums_calc_rsum_block(const char* data, int data_len, int off, int len) {
-#line 59 "rcksum/checksums.ae"
-int a = 0;
-#line 60 "rcksum/checksums.ae"
-int b = 0;
-#line 61 "rcksum/checksums.ae"
-int i = 0;
-    int c;
-while (i < len) {
-        {
-#line 63 "rcksum/checksums.ae"
-c = checksums_byte_at(data, data_len, (off + i));
-#line 64 "rcksum/checksums.ae"
-a = ((a + c) & 0xffff);
-#line 65 "rcksum/checksums.ae"
-b = ((b + a) & 0xffff);
-#line 66 "rcksum/checksums.ae"
-i = (i + 1);
-        }
-    }
-#line 68 "rcksum/checksums.ae"
-    return checksums_new_rsum(a, b);
-}
-
-#line 75 "rcksum/checksums.ae"
-static void checksums_update_rsum(RSum* r, int old_c, int new_c, int block_shift) {
-#line 76 "rcksum/checksums.ae"
-(r->a = (((r->a + new_c) - old_c) & 0xffff));
-#line 77 "rcksum/checksums.ae"
-(r->b = (((r->b + r->a) - ((old_c << block_shift) & 0xffff)) & 0xffff));
-}
-
-#line 83 "rcksum/checksums.ae"
-static const char* checksums_calc_checksum(const char* data, int len) {
-    int _heap_digest = 0; (void)_heap_digest;
-    const char* digest = NULL;
-    int _heap_err = 0; (void)_heap_err;
-    const char* err = NULL;
-#line 84 "rcksum/checksums.ae"
-    _tuple_string_int_string _tup0 = cryptography_md4_bytes(data, len);
-    { const char* _tmp_old = digest; digest = _tup0._0; if (_heap_digest) aether_heap_str_free(_tmp_old); _heap_digest = 1; }
-    int n = _tup0._1;
-    { const char* _tmp_old = err; err = _tup0._2; if (_heap_err) aether_heap_str_free(_tmp_old); _heap_err = 0; }
-if (strcmp(_aether_safe_str(err), _aether_safe_str("")) != 0) {
-        {
-#line 86 "rcksum/checksums.ae"
-            const char* _builder_ret = "";
-            if (_heap_digest) { aether_heap_str_free(digest); digest = NULL; _heap_digest = 0; }
-            /* deferred */ if (_heap_err) { aether_heap_str_free(err); err = NULL; _heap_err = 0; }
-            return _builder_ret;
-        }
-    }
-#line 88 "rcksum/checksums.ae"
-    const char* _builder_ret = digest;
-    /* deferred */ if (_heap_err) { aether_heap_str_free(err); err = NULL; _heap_err = 0; }
-    return _builder_ret;
-    /* deferred */ if (_heap_err) { aether_heap_str_free(err); err = NULL; _heap_err = 0; }
-}
-
-#line 95 "rcksum/checksums.ae"
-static int checksums_byte_at(const char* data, int data_len, int i) {
-#line 96 "rcksum/checksums.ae"
-    return (string_char_at_n(data, data_len, i) & 0xff);
-}
-
-#line 104 "rcksum/checksums.ae"
-static int checksums_calc_rhash_from_rsums(RSum* rs1, RSum* rs2, int seq_matches, int rsum_a_mask) {
-#line 105 "rcksum/checksums.ae"
-int hash = rs1->b;
-if (seq_matches > 1) {
-        {
-#line 107 "rcksum/checksums.ae"
-hash = (hash ^ ((rs2->b << 16) & 0xffffffff));
-        }
-    } else {
-        {
-#line 109 "rcksum/checksums.ae"
-hash = (hash ^ (((rs1->a & rsum_a_mask) << 16) & 0xffffffff));
-        }
-    }
-#line 111 "rcksum/checksums.ae"
-    return (hash & 0xffffffff);
-}
-
-#line 116 "rcksum/checksums.ae"
-static int checksums_log2(int x) {
-if (x == 0) {
-        {
-#line 118 "rcksum/checksums.ae"
-            return 0;
-        }
-    }
-#line 120 "rcksum/checksums.ae"
-int n = 0;
-#line 121 "rcksum/checksums.ae"
-int64_t v = (x & 0xffffffff);
-while (v > 1) {
-        {
-#line 123 "rcksum/checksums.ae"
-v = (v >> 1);
-#line 124 "rcksum/checksums.ae"
-n = (n + 1);
-        }
-    }
-#line 126 "rcksum/checksums.ae"
-    return n;
-}
-
 #line 23 "rcksum/fileio.ae"
 static int fileio_open_rw(const char* path) {
 #line 24 "rcksum/fileio.ae"
@@ -2097,6 +2777,12 @@ static const char* fileio_buf_as_string(void* b) {
     return zsync_buf_identity(b);
 }
 
+#line 148 "rcksum/fileio.ae"
+static const char* fileio_dup16(void* b) {
+#line 149 "rcksum/fileio.ae"
+    return zsync_dup16(b);
+}
+
 #line 25 "test/assert.ae"
 static Harness* assert_new(void) {
 #line 26 "test/assert.ae"
@@ -2185,6 +2871,148 @@ exit(1);
 }
 
 // Import: std.list
+// Import: rcksum.checksums
+#line 32 "rcksum/checksums.ae"
+static RSum* checksums_new_rsum(int a, int b) {
+#line 33 "rcksum/checksums.ae"
+void* raw = malloc(16);
+#line 34 "rcksum/checksums.ae"
+RSum* r = ((RSum*)(raw));
+#line 35 "rcksum/checksums.ae"
+(r->a = (a & 0xffff));
+#line 36 "rcksum/checksums.ae"
+(r->b = (b & 0xffff));
+#line 37 "rcksum/checksums.ae"
+    return r;
+}
+
+#line 42 "rcksum/checksums.ae"
+static void* checksums_rsum_as_ptr(RSum* r) {
+#line 43 "rcksum/checksums.ae"
+    return r;
+}
+
+#line 46 "rcksum/checksums.ae"
+static int checksums_rsum_a(RSum* r) {
+#line 47 "rcksum/checksums.ae"
+    return r->a;
+}
+
+#line 50 "rcksum/checksums.ae"
+static int checksums_rsum_b(RSum* r) {
+#line 51 "rcksum/checksums.ae"
+    return r->b;
+}
+
+#line 58 "rcksum/checksums.ae"
+static RSum* checksums_calc_rsum_block(const char* data, int data_len, int off, int len) {
+#line 59 "rcksum/checksums.ae"
+int a = 0;
+#line 60 "rcksum/checksums.ae"
+int b = 0;
+#line 61 "rcksum/checksums.ae"
+int i = 0;
+    int c;
+while (i < len) {
+        {
+#line 63 "rcksum/checksums.ae"
+c = checksums_byte_at(data, data_len, (off + i));
+#line 64 "rcksum/checksums.ae"
+a = ((a + c) & 0xffff);
+#line 65 "rcksum/checksums.ae"
+b = ((b + a) & 0xffff);
+#line 66 "rcksum/checksums.ae"
+i = (i + 1);
+        }
+    }
+#line 68 "rcksum/checksums.ae"
+    return checksums_new_rsum(a, b);
+}
+
+#line 75 "rcksum/checksums.ae"
+static void checksums_update_rsum(RSum* r, int old_c, int new_c, int block_shift) {
+#line 76 "rcksum/checksums.ae"
+(r->a = (((r->a + new_c) - old_c) & 0xffff));
+#line 77 "rcksum/checksums.ae"
+(r->b = (((r->b + r->a) - ((old_c << block_shift) & 0xffff)) & 0xffff));
+}
+
+#line 83 "rcksum/checksums.ae"
+static const char* checksums_calc_checksum(const char* data, int len) {
+    int _heap_digest = 0; (void)_heap_digest;
+    const char* digest = NULL;
+    int _heap_err = 0; (void)_heap_err;
+    const char* err = NULL;
+#line 84 "rcksum/checksums.ae"
+    _tuple_string_int_string _tup1 = cryptography_md4_bytes(data, len);
+    { const char* _tmp_old = digest; digest = _tup1._0; if (_heap_digest) aether_heap_str_free(_tmp_old); _heap_digest = 1; }
+    int n = _tup1._1;
+    { const char* _tmp_old = err; err = _tup1._2; if (_heap_err) aether_heap_str_free(_tmp_old); _heap_err = 0; }
+if (strcmp(_aether_safe_str(err), _aether_safe_str("")) != 0) {
+        {
+#line 86 "rcksum/checksums.ae"
+            const char* _builder_ret = "";
+            if (_heap_digest) { aether_heap_str_free(digest); digest = NULL; _heap_digest = 0; }
+            /* deferred */ if (_heap_err) { aether_heap_str_free(err); err = NULL; _heap_err = 0; }
+            return _builder_ret;
+        }
+    }
+#line 88 "rcksum/checksums.ae"
+    const char* _builder_ret = digest;
+    /* deferred */ if (_heap_err) { aether_heap_str_free(err); err = NULL; _heap_err = 0; }
+    return _builder_ret;
+    /* deferred */ if (_heap_err) { aether_heap_str_free(err); err = NULL; _heap_err = 0; }
+}
+
+#line 95 "rcksum/checksums.ae"
+static int checksums_byte_at(const char* data, int data_len, int i) {
+#line 96 "rcksum/checksums.ae"
+    return (string_char_at_n(data, data_len, i) & 0xff);
+}
+
+#line 104 "rcksum/checksums.ae"
+static int checksums_calc_rhash_from_rsums(RSum* rs1, RSum* rs2, int seq_matches, int rsum_a_mask) {
+#line 105 "rcksum/checksums.ae"
+int hash = rs1->b;
+if (seq_matches > 1) {
+        {
+#line 107 "rcksum/checksums.ae"
+hash = (hash ^ ((rs2->b << 16) & 0xffffffff));
+        }
+    } else {
+        {
+#line 109 "rcksum/checksums.ae"
+hash = (hash ^ (((rs1->a & rsum_a_mask) << 16) & 0xffffffff));
+        }
+    }
+#line 111 "rcksum/checksums.ae"
+    return (hash & 0xffffffff);
+}
+
+#line 116 "rcksum/checksums.ae"
+static int checksums_log2(int x) {
+if (x == 0) {
+        {
+#line 118 "rcksum/checksums.ae"
+            return 0;
+        }
+    }
+#line 120 "rcksum/checksums.ae"
+int n = 0;
+#line 121 "rcksum/checksums.ae"
+int64_t v = (x & 0xffffffff);
+while (v > 1) {
+        {
+#line 123 "rcksum/checksums.ae"
+v = (v >> 1);
+#line 124 "rcksum/checksums.ae"
+n = (n + 1);
+        }
+    }
+#line 126 "rcksum/checksums.ae"
+    return n;
+}
+
 // Import: std.map
 // Import: rcksum.ranges
 #line 27 "rcksum/ranges.ae"
@@ -2543,85 +3371,102 @@ int main(int argc, char** argv) {
     #endif
     aether_args_init(argc, argv);
     
-    int _heap_a = 0; (void)_heap_a;
-    const char* a = NULL;
-    int _heap_b = 0; (void)_heap_b;
-    const char* b = NULL;
-    int _heap_c = 0; (void)_heap_c;
-    const char* c = NULL;
-    int _heap_d = 0; (void)_heap_d;
-    const char* d = NULL;
+    int _heap_zbytes = 0; (void)_heap_zbytes;
+    const char* zbytes = NULL;
+    int _heap_zerr = 0; (void)_heap_zerr;
+    const char* zerr = NULL;
     int _heap_seed = 0; (void)_heap_seed;
     const char* seed = NULL;
-    int _heap_result = 0; (void)_heap_result;
-    const char* result = NULL;
+    int _heap_serr = 0; (void)_heap_serr;
+    const char* serr = NULL;
+    int _heap_out = 0; (void)_heap_out;
+    const char* out = NULL;
+    int _heap_sha = 0; (void)_heap_sha;
+    const char* sha = NULL;
+    int _heap_e = 0; (void)_heap_e;
+    const char* e = NULL;
     {
-#line 28 "rcksum/rcksum_test.ae"
-puts("=== rcksum end-to-end (parity vs Go TestE2E) ===");
-#line 29 "rcksum/rcksum_test.ae"
+#line 20 "zsync/control_test.ae"
+puts("=== control parse + reconstruct (real .zsync) ===");
+#line 21 "zsync/control_test.ae"
 Harness* h = assert_new();
-#line 31 "rcksum/rcksum_test.ae"
-int bs = 8;
-#line 32 "rcksum/rcksum_test.ae"
-int nb = 4;
-#line 33 "rcksum/rcksum_test.ae"
-{ const char* _tmp_old = a; a = "AAAAAAAA"; if (_heap_a) aether_heap_str_free(_tmp_old); _heap_a = 0; }
-#line 34 "rcksum/rcksum_test.ae"
-{ const char* _tmp_old = b; b = "BBBBBBBB"; if (_heap_b) aether_heap_str_free(_tmp_old); _heap_b = 0; }
-#line 35 "rcksum/rcksum_test.ae"
-{ const char* _tmp_old = c; c = "CCCCCCCC"; if (_heap_c) aether_heap_str_free(_tmp_old); _heap_c = 0; }
-#line 36 "rcksum/rcksum_test.ae"
-{ const char* _tmp_old = d; d = "DDDDDDDD"; if (_heap_d) aether_heap_str_free(_tmp_old); _heap_d = 0; }
-#line 38 "rcksum/rcksum_test.ae"
-RcksumState* z = rcksum_new(nb, bs, 4, 16, 1);
-#line 39 "rcksum/rcksum_test.ae"
-add_block(z, 0, a);
-#line 40 "rcksum/rcksum_test.ae"
-add_block(z, 1, b);
-#line 41 "rcksum/rcksum_test.ae"
-add_block(z, 2, c);
-#line 42 "rcksum/rcksum_test.ae"
-add_block(z, 3, d);
-#line 44 "rcksum/rcksum_test.ae"
-assert_eq_int(h, rcksum_blocks_todo(z), 4, "todo=4 before any data");
-#line 47 "rcksum/rcksum_test.ae"
-int fd = fileio_open_rw("/tmp/zsync_rcksum_e2e.bin");
-#line 48 "rcksum/rcksum_test.ae"
-assert_ok(h, (fd >= 0), "output file opened");
-#line 49 "rcksum/rcksum_test.ae"
-rcksum_set_target_fd(z, fd);
-#line 52 "rcksum/rcksum_test.ae"
-{ const char* _tmp_old = seed; seed = "xxxBBBBBBBByyyDDDDDDDDzz"; if (_heap_seed) aether_heap_str_free(_tmp_old); _heap_seed = 0; }
-#line 53 "rcksum/rcksum_test.ae"
-rcksum_submit_source_buffer(z, seed, string_length(seed));
-#line 54 "rcksum/rcksum_test.ae"
-assert_eq_int(h, rcksum_blocks_todo(z), 2, "todo=2 after seed (B,D matched)");
-#line 57 "rcksum/rcksum_test.ae"
-rcksum_submit_blocks(z, a, 8, 0, 0);
-#line 58 "rcksum/rcksum_test.ae"
-rcksum_submit_blocks(z, c, 8, 2, 2);
-#line 59 "rcksum/rcksum_test.ae"
-assert_eq_int(h, rcksum_blocks_todo(z), 0, "todo=0 after submitting A,C");
-#line 62 "rcksum/rcksum_test.ae"
+#line 24 "zsync/control_test.ae"
+        _tuple_string_int_string _tup2 = fs_read_binary("/tmp/ctltest.dat.zsync");
+        { const char* _tmp_old = zbytes; zbytes = _tup2._0; if (_heap_zbytes) aether_heap_str_free(_tmp_old); _heap_zbytes = 1; }
+        int zlen = _tup2._1;
+        { const char* _tmp_old = zerr; zerr = _tup2._2; if (_heap_zerr) aether_heap_str_free(_tmp_old); _heap_zerr = 0; }
+#line 25 "zsync/control_test.ae"
+assert_eq_str(h, zerr, "", "read .zsync: no error");
+#line 26 "zsync/control_test.ae"
+assert_ok(h, (zlen > 0), ".zsync non-empty");
+#line 28 "zsync/control_test.ae"
+Control* c = control_parse(zbytes, zlen);
+#line 29 "zsync/control_test.ae"
+assert_eq_int(h, control_ctl_ok(c), 1, "parse ok");
+if (control_ctl_ok(c) == 0) {
+            {
+#line 31 "zsync/control_test.ae"
+printf("parse error: %s", _aether_safe_str(control_ctl_err(c))); putchar('\n');
+            }
+        }
+#line 33 "zsync/control_test.ae"
+assert_eq_int(h, control_ctl_filelen(c), 5000, "Length=5000");
+#line 34 "zsync/control_test.ae"
+assert_eq_int(h, control_ctl_blocksize(c), 1024, "Blocksize=1024");
+#line 35 "zsync/control_test.ae"
+assert_eq_int(h, control_ctl_blocks(c), 5, "blocks=5 (ceil 5000/1024)");
+#line 36 "zsync/control_test.ae"
+assert_eq_str(h, control_ctl_filename(c), "ctltest.dat", "Filename");
+#line 37 "zsync/control_test.ae"
+assert_eq_str(h, control_ctl_checksum(c), "f5d0ac38bfdafcbc2bfe68aad7af017c6b8ad946", "SHA-1 header");
+#line 40 "zsync/control_test.ae"
+void* rs = control_ctl_rs(c);
+#line 41 "zsync/control_test.ae"
+int fd = fileio_open_rw("/tmp/zsync_ctl_out.bin");
+#line 42 "zsync/control_test.ae"
+assert_ok(h, (fd >= 0), "output opened");
+#line 43 "zsync/control_test.ae"
+rcksum_set_target_fd_p(rs, fd);
+#line 45 "zsync/control_test.ae"
+        _tuple_string_int_string _tup3 = fs_read_binary("/tmp/ctltest.dat");
+        { const char* _tmp_old = seed; seed = _tup3._0; if (_heap_seed) aether_heap_str_free(_tmp_old); _heap_seed = 1; }
+        int slen = _tup3._1;
+        { const char* _tmp_old = serr; serr = _tup3._2; if (_heap_serr) aether_heap_str_free(_tmp_old); _heap_serr = 0; }
+#line 46 "zsync/control_test.ae"
+assert_eq_str(h, serr, "", "read seed: no error");
+#line 47 "zsync/control_test.ae"
+rcksum_submit_source_buffer_p(rs, seed, slen);
+#line 49 "zsync/control_test.ae"
+int todo = rcksum_blocks_todo_p(rs);
+#line 50 "zsync/control_test.ae"
+assert_eq_int(h, todo, 0, "all 5 blocks matched from original-as-seed");
+#line 53 "zsync/control_test.ae"
+fileio_truncate_to(fd, 5000);
+#line 54 "zsync/control_test.ae"
 fileio_sync_fd(fd);
-#line 63 "rcksum/rcksum_test.ae"
-        _tuple_string_int _tup1 = fileio_read_at(fd, 32, 0);
-        { const char* _tmp_old = result; result = _tup1._0; if (_heap_result) aether_heap_str_free(_tmp_old); _heap_result = 1; }
-        int rn = _tup1._1;
-#line 64 "rcksum/rcksum_test.ae"
-assert_eq_int(h, rn, 32, "32 bytes reconstructed");
-#line 65 "rcksum/rcksum_test.ae"
-assert_eq_str(h, result, "AAAAAAAABBBBBBBBCCCCCCCCDDDDDDDD", "file == target");
-#line 67 "rcksum/rcksum_test.ae"
+#line 55 "zsync/control_test.ae"
+        _tuple_string_int _tup4 = fileio_read_at(fd, 5000, 0);
+        { const char* _tmp_old = out; out = _tup4._0; if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 1; }
+        int on = _tup4._1;
+#line 56 "zsync/control_test.ae"
+assert_eq_int(h, on, 5000, "output is 5000 bytes");
+#line 57 "zsync/control_test.ae"
+        _tuple_string_string _tup5 = cryptography_sha1_hex(out, on);
+        { const char* _tmp_old = sha; sha = _tup5._0; if (_heap_sha) aether_heap_str_free(_tmp_old); _heap_sha = 1; }
+        { const char* _tmp_old = e; e = _tup5._1; if (_heap_e) aether_heap_str_free(_tmp_old); _heap_e = 0; }
+#line 58 "zsync/control_test.ae"
+assert_eq_str(h, sha, "f5d0ac38bfdafcbc2bfe68aad7af017c6b8ad946", "reconstructed SHA-1 matches");
+#line 60 "zsync/control_test.ae"
 fileio_close_fd(fd);
-#line 68 "rcksum/rcksum_test.ae"
+#line 61 "zsync/control_test.ae"
 assert_report(h);
     }
-    /* deferred */ if (_heap_result) { aether_heap_str_free(result); result = NULL; _heap_result = 0; }
+    /* deferred */ if (_heap_e) { aether_heap_str_free(e); e = NULL; _heap_e = 0; }
+    /* deferred */ if (_heap_sha) { aether_heap_str_free(sha); sha = NULL; _heap_sha = 0; }
+    /* deferred */ if (_heap_out) { aether_heap_str_free(out); out = NULL; _heap_out = 0; }
+    /* deferred */ if (_heap_serr) { aether_heap_str_free(serr); serr = NULL; _heap_serr = 0; }
     /* deferred */ if (_heap_seed) { aether_heap_str_free(seed); seed = NULL; _heap_seed = 0; }
-    /* deferred */ if (_heap_d) { aether_heap_str_free(d); d = NULL; _heap_d = 0; }
-    /* deferred */ if (_heap_c) { aether_heap_str_free(c); c = NULL; _heap_c = 0; }
-    /* deferred */ if (_heap_b) { aether_heap_str_free(b); b = NULL; _heap_b = 0; }
-    /* deferred */ if (_heap_a) { aether_heap_str_free(a); a = NULL; _heap_a = 0; }
+    /* deferred */ if (_heap_zerr) { aether_heap_str_free(zerr); zerr = NULL; _heap_zerr = 0; }
+    /* deferred */ if (_heap_zbytes) { aether_heap_str_free(zbytes); zbytes = NULL; _heap_zbytes = 0; }
     return 0;
 }

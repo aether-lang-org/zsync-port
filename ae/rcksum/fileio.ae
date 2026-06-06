@@ -106,8 +106,73 @@ buf_free(b: ptr) {
 // bytes, copying via string_new_with_length. Used after mutating a
 // buf_alloc'd buffer with buf_set.
 buf_to_str(b: ptr, n: int) -> string {
-    return string_new_with_length(buf_as_string(b), n)
+    s = string_new_with_length(buf_as_string(b), n)
+    // Retain so the heap-string tracker doesn't free it when the
+    // producing function returns — these buffers get stored into
+    // malloc'd structs (HashEntry.md4) the tracker can't see.
+    string_retain(s)
+    return s
+}
+
+// Copy `src` (src_len bytes) but with the first `prefix` bytes zeroed.
+// Used by tests to fabricate a partial seed.
+zero_prefix(src: string, src_len: int, prefix: int) -> string {
+    out = zsync_buf_alloc(src_len)
+    i = 0
+    while i < src_len {
+        if i < prefix {
+            zsync_buf_set(out, i, 0)
+        } else {
+            zsync_buf_set(out, i, string_char_at_n(src, src_len, i) & 0xff)
+        }
+        i = i + 1
+    }
+    return string_new_with_length(buf_as_string(out), src_len)
+}
+
+// Copy `rem` bytes of `src` at `start` into a fresh `blocksize`-byte
+// buffer, zero-padding the tail. For the short last block of a download.
+pad_block(src: string, src_len: int, start: int, rem: int, blocksize: int) -> string {
+    out = zsync_buf_alloc(blocksize)
+    i = 0
+    while i < rem {
+        zsync_buf_set(out, i, string_char_at_n(src, src_len, start + i) & 0xff)
+        i = i + 1
+    }
+    return string_new_with_length(buf_as_string(out), blocksize)
+}
+
+// Binary-safe substring: copy bytes [start, start+len) of a length-aware
+// buffer `src` (total length src_len) into a fresh length-aware string.
+// std's string_substring is strlen-based and TRUNCATES at the first NUL,
+// so it cannot be used on binary block data.
+slice(src: string, src_len: int, start: int, len: int) -> string {
+    out = zsync_buf_alloc(len)
+    i = 0
+    while i < len {
+        zsync_buf_set(out, i, string_char_at_n(src, src_len, start + i) & 0xff)
+        i = i + 1
+    }
+    return string_new_with_length(buf_as_string(out), len)
 }
 
 // ptr-typed buffer re-typed as string (identity at the C level).
-@extern("zsync_buf_identity") buf_as_string(b: ptr) -> string
+extern zsync_buf_identity(b: ptr) -> string
+buf_as_string(b: ptr) -> string {
+    return zsync_buf_identity(b)
+}
+
+// Persistently copy 16 bytes out of a buf into a fresh, process-lifetime
+// buffer returned as a length-16 string. Use this (not buf_to_str) for
+// values stashed into long-lived structs (target-block MD4s) — it does
+// not go through the heap-string tracker, which was recycling buffers.
+// Returns a raw malloc'd char* (typed string) — deliberately NOT an
+// AetherString, so the heap-string tracker treats it as borrowed and
+// never frees/recycles it. This is what target-block MD4s need: they
+// live for the whole run inside untracked malloc'd HashEntry structs,
+// and going through string_new_with_length had the tracker recycling
+// the backing buffers (cross-linking block checksums).
+extern zsync_dup16(b: ptr) -> string
+dup16(b: ptr) -> string {
+    return zsync_dup16(b)
+}

@@ -1,0 +1,63 @@
+// SPDX-FileCopyrightText: 2004,2005,2007,2009,2025,2026 Colin Phipps <cph@moria.org.uk>
+// SPDX-License-Identifier: Artistic-2.0
+//
+// End-to-end State test: the full client flow without HTTP. Parse the
+// real .zsync, seed with a PARTIAL copy of the file (first 2 blocks
+// zeroed so they're missing), then satisfy the needed byte ranges by
+// copying those bytes out of the original (standing in for HTTP range
+// fetches), and verify complete() passes the SHA-1.
+
+import std.string (*)
+import std.fs
+import zsync.control
+import zsync.download
+import rcksum.fileio
+import test.assert
+
+main() {
+    println("=== State full client flow (no HTTP) ===")
+    h = assert.new()
+
+    zb, zl, ze = fs.read_binary("/tmp/ctltest.dat.zsync")
+    c = control.parse(zb, zl)
+    assert.eq_int(h, control.ctl_ok(c), 1, "parse ok")
+
+    fd = fileio.open_rw("/tmp/zsync_state_out.bin")
+    assert.ok(h, fd >= 0, "output opened")
+    s = download.new_state(c, fd)
+
+    assert.eq_int(h, download.status(s), 0, "status 0 before any data")
+
+    // Seed: the original file with its first 2048 bytes (blocks 0,1)
+    // zeroed out -> those blocks won't match, the rest will.
+    orig, olen, oe = fs.read_binary("/tmp/ctltest.dat")
+    seed = fileio.zero_prefix(orig, olen, 2048)
+    download.submit_source(s, seed, olen)
+
+    st = download.status(s)
+    assert.ok(h, st == 1, "status partial after partial seed")
+
+    // Ask what's still needed; should cover the first ~2048 bytes.
+    needed = download.needed_byte_ranges(s)
+    nn = download.br_count(needed)
+    assert.ok(h, nn >= 1, "at least one needed range")
+
+    // Satisfy each needed range from the original file (HTTP stand-in).
+    i = 0
+    while i < nn {
+        rstart = download.br_at_start(needed, i)
+        rfin = download.br_at_fin(needed, i)
+        rlen = rfin - rstart + 1
+        chunk = fileio.slice(orig, olen, rstart, rlen)
+        download.submit_target_data(s, rstart, chunk, rlen)
+        i = i + 1
+    }
+
+    assert.eq_int(h, download.status(s), 2, "status complete after filling ranges")
+
+    err = download.complete(s)
+    assert.eq_str(h, err, "", "complete() verifies SHA-1 OK")
+
+    fileio.close_fd(fd)
+    assert.report(h)
+}

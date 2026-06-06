@@ -166,6 +166,57 @@ set_target_fd(z: *RcksumState, fd: int) {
     z.fd = fd
 }
 
+// Erase the *RcksumState type to a bare ptr for storage in a ptr field
+// (cross-module struct types can't be field types yet).
+state_as_ptr(z: *RcksumState) -> ptr {
+    return z
+}
+
+// ptr-accepting wrappers, for callers (control/state) that hold the
+// state as a bare ptr. They re-type the ptr to *RcksumState (which IS
+// valid: `as *Struct`) and delegate.
+set_target_fd_p(z: ptr, fd: int) {
+    set_target_fd(z as *RcksumState, fd)
+}
+
+blocks_todo_p(z: ptr) -> int {
+    return blocks_todo(z as *RcksumState)
+}
+
+submit_source_buffer_p(z: ptr, data: string, data_len: int) -> int {
+    return submit_source_buffer(z as *RcksumState, data, data_len)
+}
+
+submit_blocks_p(z: ptr, data: string, data_len: int, bfrom: int, bto: int) {
+    submit_blocks(z as *RcksumState, data, data_len, bfrom, bto)
+}
+
+needed_block_ranges_p(z: ptr) -> ptr {
+    return needed_block_ranges(z as *RcksumState)
+}
+
+// Accessors over a needed-block-ranges list (list of *BlockPair),
+// delegating to ranges so callers don't name the BlockPair type.
+ranges_list_len(l: ptr) -> int {
+    return ranges.list_len(l)
+}
+
+ranges_list_start(l: ptr, i: int) -> int {
+    return ranges.pair_start(ranges.list_pair(l, i))
+}
+
+ranges_list_fin(l: ptr, i: int) -> int {
+    return ranges.pair_fin(ranges.list_pair(l, i))
+}
+
+read_known_data_p(z: ptr, len: int, offset: int) -> (string, int) {
+    return read_known_data(z as *RcksumState, len, offset)
+}
+
+add_target_block_p(z: ptr, b: int, rsum_a: int, rsum_b: int, md4: string) {
+    add_target_block(z as *RcksumState, b, rsum_a, rsum_b, md4)
+}
+
 // AddTargetBlock: store the stored hashes for block b.
 add_target_block(z: *RcksumState, b: int, rsum_a: int, rsum_b: int, md4: string) {
     if b < z.blocks {
@@ -344,7 +395,7 @@ submit_blocks(z: *RcksumState, data: string, data_len: int, bfrom: int, bto: int
     x = bfrom
     while x <= bto {
         off = (x - bfrom) << z.block_shift
-        block = string_substring(data, off, off + z.block_size)
+        block = fileio.slice(data, data_len, off, z.block_size)
         md = checksums.calc_checksum(block, z.block_size)
         stored = entry_at(z, x).md4
         if prefix_eq(md, 16, stored, 16, z.checksum_bytes) == 0 {
@@ -356,7 +407,7 @@ submit_blocks(z: *RcksumState, data: string, data_len: int, bfrom: int, bto: int
     // (x == bfrom) the span is zero — write nothing.
     if x > bfrom {
         span_len = (x - bfrom) << z.block_shift
-        prefix = string_substring(data, 0, span_len)
+        prefix = fileio.slice(data, data_len, 0, span_len)
         write_blocks(z, prefix, span_len, bfrom, x - 1, NO_BLOCK())
     }
 }
@@ -429,7 +480,7 @@ check_chain(z: *RcksumState, id: int, data: string, data_len: int, doff: int) ->
                 if boff + z.block_size > data_len {
                     break
                 }
-                block = string_substring(data, boff, boff + z.block_size)
+                block = fileio.slice(data, data_len, boff, z.block_size)
                 md = checksums.calc_checksum(block, z.block_size)
                 if checkmd4 == 0 {
                     md_cache0 = md
@@ -467,7 +518,7 @@ check_chain(z: *RcksumState, id: int, data: string, data_len: int, doff: int) ->
         }
 
         span_len = num_write * z.block_size
-        prefix = string_substring(data, doff, doff + span_len)
+        prefix = fileio.slice(data, data_len, doff, span_len)
         next = write_blocks(z, prefix, span_len, id, id + num_write - 1, next)
         got = got + num_write
     }
@@ -611,3 +662,14 @@ read_known_data(z: *RcksumState, len: int, offset: int) -> (string, int) {
     }
     return fileio.read_at(z.fd, len, offset)
 }
+
+
+
+
+
+
+
+
+
+
+

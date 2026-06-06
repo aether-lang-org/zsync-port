@@ -30,8 +30,13 @@ test-pure:
 # Tests that link the C shim: compile .ae -> .c, then cc with the shim.
 # $(AETHERC) emits a .c next to the source; we compile+link it with the
 # sidecar object and the aether runtime.
-# Generic rule: build any *_test.ae that needs the C shim, then run it.
+# Generic rules: build any *_test.ae that needs the C shim, then run it.
 build/%: rcksum/%.ae $(C_OBJS)
+	@mkdir -p build
+	$(AETHERC) $< build/$*.c
+	$(CC) build/$*.c $(C_OBJS) $(CFLAGS_AE) -o $@
+
+build/%: zsync/%.ae $(C_OBJS)
 	@mkdir -p build
 	$(AETHERC) $< build/$*.c
 	$(CC) build/$*.c $(C_OBJS) $(CFLAGS_AE) -o $@
@@ -42,7 +47,13 @@ test-fileio: build/fileio_test
 test-rcksum: build/rcksum_test
 	./build/rcksum_test
 
-test: test-pure test-fileio test-rcksum
+test-control: build/control_test
+	./build/control_test
+
+test-state: build/download_test
+	./build/download_test
+
+test: test-pure test-fileio test-rcksum test-control test-state
 
 clean:
 	rm -f rcksum/*.o build/*

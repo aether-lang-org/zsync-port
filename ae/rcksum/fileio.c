@@ -100,6 +100,19 @@ char *zsync_buf_alloc_str(long n) {
     return (char *)calloc((size_t)n, 1);
 }
 
+/* Persistently copy the first 16 bytes of a raw byte buffer `b` (as
+ * produced by zsync_buf_alloc + zsync_buf_set) into a fresh malloc'd
+ * 16-byte buffer, returned as char*. Owned for the process lifetime
+ * (one per target block) — no dependency on Aether's heap-string
+ * tracker, which was recycling buffers and cross-linking block MD4s. */
+char *zsync_dup16(unsigned char *b) {
+    char *out = (char *)malloc(17);
+    if (!out) return out;
+    for (int i = 0; i < 16; i++) out[i] = (char)b[i];
+    out[16] = '\0';
+    return out;
+}
+
 int zsync_buf_get(unsigned char *b, long i) {
     return (int)b[i];
 }
@@ -121,6 +134,7 @@ void zsync_buf_free(unsigned char *b) {
 char *zsync_buf_identity(unsigned char *b) {
     return (char *)b;
 }
+
 
 /* fsync to flush before close/rename. Returns 0 / -1. */
 int zsync_io_fsync(int fd) {
