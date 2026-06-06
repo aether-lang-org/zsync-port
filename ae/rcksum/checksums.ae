@@ -1,0 +1,121 @@
+// SPDX-FileCopyrightText: 2004,2005,2007,2009,2025,2026 Colin Phipps <cph@moria.org.uk>
+// SPDX-License-Identifier: Artistic-2.0
+//
+// Port of the checksum primitives from internal/rcksum/rcksum.go and
+// hash.go: the Adler-style rolling rsum, the MD4 strong checksum, the
+// rhash key derivation, and log2.
+//
+// CRITICAL: the Go code does all rsum arithmetic in uint16 and relies
+// on silent 16-bit wraparound. Aether `int` is 64-bit, so every rsum
+// value is masked with & 0xffff after each operation to reproduce the
+// exact overflow behaviour. Getting this wrong yields rsums that match
+// for small files but diverge once a byte sum exceeds 65535 — a silent
+// correctness bug. Verified byte-for-byte against the Go oracle.
+
+import std.cryptography
+import std.string (*)
+
+extern malloc(size: int) -> ptr
+extern free(p: ptr)
+
+// MD4 digest size in bytes (the full strong checksum width).
+CHECKSUM_SIZE() -> int {
+    return 16
+}
+
+// A rolling checksum: A = sum of bytes, B = weighted sum. Both uint16.
+struct RSum {
+    a: int   // held masked to 16 bits
+    b: int
+}
+
+new_rsum(a: int, b: int) -> *RSum {
+    raw = malloc(16)
+    r = raw as *RSum
+    r.a = a & 0xffff
+    r.b = b & 0xffff
+    return r
+}
+
+rsum_a(r: *RSum) -> int {
+    return r.a
+}
+
+rsum_b(r: *RSum) -> int {
+    return r.b
+}
+
+// CalcRsumBlock: rsum over `len` bytes of buffer `data` (whose total
+// length is `data_len`) starting at byte offset `off`. Mirrors the Go
+// loop a+=c; b+=a, both uint16. data_len is needed for the length-aware,
+// binary-safe byte accessor (block data routinely contains NULs).
+calc_rsum_block(data: string, data_len: int, off: int, len: int) -> *RSum {
+    a = 0
+    b = 0
+    i = 0
+    while i < len {
+        c = byte_at(data, data_len, off + i)
+        a = (a + c) & 0xffff
+        b = (b + a) & 0xffff
+        i = i + 1
+    }
+    return new_rsum(a, b)
+}
+
+// updateRsum: roll the window by one byte — remove old_c, add new_c.
+// Go:  A += newC - oldC
+//      B += A - (oldC << blockShift)
+// All uint16. block_shift = log2(blocksize).
+update_rsum(r: *RSum, old_c: int, new_c: int, block_shift: int) {
+    r.a = (r.a + new_c - old_c) & 0xffff
+    r.b = (r.b + r.a - ((old_c << block_shift) & 0xffff)) & 0xffff
+}
+
+// CalcChecksum: full 16-byte MD4 of a block. Returns a heap byte buffer
+// (the caller may compare a truncated prefix). md4_bytes (#637) gives
+// the raw 16 bytes — binary-safe, no hex round-trip.
+calc_checksum(data: string, len: int) -> string {
+    digest, n, err = cryptography.md4_bytes(data, len)
+    if err != "" {
+        return ""
+    }
+    return digest
+}
+
+// Read one unsigned byte (0..255) from a length-aware byte buffer at
+// index i. Uses string_char_at_n (binary-safe) because block data
+// routinely contains embedded NULs that the strlen-based char_at would
+// trip over.
+byte_at(data: string, data_len: int, i: int) -> int {
+    return string_char_at_n(data, data_len, i) & 0xff
+}
+
+// calcRhashFromRSums: derive the hash-table key from one or two rsums.
+//   hash  = rs1.B
+//   seq>1: hash ^= rs2.B << 16
+//   else : hash ^= (rs1.A & rsum_a_mask) << 16
+// Result is a uint32; mask to 32 bits.
+calc_rhash_from_rsums(rs1: *RSum, rs2: *RSum, seq_matches: int, rsum_a_mask: int) -> int {
+    hash = rs1.b
+    if seq_matches > 1 {
+        hash = hash ^ ((rs2.b << 16) & 0xffffffff)
+    } else {
+        hash = hash ^ (((rs1.a & rsum_a_mask) << 16) & 0xffffffff)
+    }
+    return hash & 0xffffffff
+}
+
+// log2: base-2 log (floor) of x, matching Go's bits.Len32(x)-1.
+// Returns 0 for x == 0.
+log2(x: int) -> int {
+    if x == 0 {
+        return 0
+    }
+    n = 0
+    v = x & 0xffffffff
+    while v > 1 {
+        v = v >> 1
+        n = n + 1
+    }
+    return n
+}
