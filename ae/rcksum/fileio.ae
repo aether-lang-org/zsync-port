@@ -64,3 +64,50 @@ close_fd(fd: int) -> int {
 sync_fd(fd: int) -> int {
     return zsync_io_fsync(fd)
 }
+
+// --- mutable byte buffer (for the bithash table) ---
+extern zsync_buf_alloc(n: long) -> ptr
+// Same allocator, char*-returning, for callers that wrap it with
+// string_new_with_length (avoids a ptr->string `as` cast, which the
+// language doesn't permit).
+extern zsync_buf_alloc_str(n: long) -> string
+extern zsync_buf_get(b: ptr, i: long) -> int
+extern zsync_buf_set(b: ptr, i: long, v: int)
+extern zsync_buf_or(b: ptr, i: long, v: int)
+extern zsync_buf_free(b: ptr)
+
+buf_alloc(n: int) -> ptr {
+    return zsync_buf_alloc(n)
+}
+
+// Allocate a zeroed buffer of n bytes, returned as a length-aware
+// Aether string of length n.
+buf_alloc_str(n: int) -> string {
+    return string_new_with_length(zsync_buf_alloc_str(n), n)
+}
+
+buf_get(b: ptr, i: int) -> int {
+    return zsync_buf_get(b, i)
+}
+
+buf_set(b: ptr, i: int, v: int) {
+    zsync_buf_set(b, i, v)
+}
+
+buf_or(b: ptr, i: int, v: int) {
+    zsync_buf_or(b, i, v)
+}
+
+buf_free(b: ptr) {
+    zsync_buf_free(b)
+}
+
+// Wrap an existing byte buffer (ptr) as a length-aware string of n
+// bytes, copying via string_new_with_length. Used after mutating a
+// buf_alloc'd buffer with buf_set.
+buf_to_str(b: ptr, n: int) -> string {
+    return string_new_with_length(buf_as_string(b), n)
+}
+
+// ptr-typed buffer re-typed as string (identity at the C level).
+@extern("zsync_buf_identity") buf_as_string(b: ptr) -> string

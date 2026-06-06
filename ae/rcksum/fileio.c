@@ -85,6 +85,43 @@ int zsync_io_close(int fd) {
     return close(fd);
 }
 
+/* --- mutable byte-buffer helpers ---
+ * The rcksum core needs a mutable byte array for the bithash table
+ * (get / set-bit / test-bit). std.intarr is fixed-size-int only and
+ * std has no mutable byte buffer, so expose a minimal one here. */
+
+unsigned char *zsync_buf_alloc(long n) {
+    unsigned char *b = (unsigned char *)calloc((size_t)n, 1);
+    return b;
+}
+
+/* Same allocator, char*-typed return for the string-wrapping path. */
+char *zsync_buf_alloc_str(long n) {
+    return (char *)calloc((size_t)n, 1);
+}
+
+int zsync_buf_get(unsigned char *b, long i) {
+    return (int)b[i];
+}
+
+void zsync_buf_set(unsigned char *b, long i, int v) {
+    b[i] = (unsigned char)(v & 0xff);
+}
+
+void zsync_buf_or(unsigned char *b, long i, int v) {
+    b[i] |= (unsigned char)(v & 0xff);
+}
+
+void zsync_buf_free(unsigned char *b) {
+    free(b);
+}
+
+/* Identity — re-types a byte buffer pointer as char* for the Aether
+ * side to wrap with string_new_with_length. */
+char *zsync_buf_identity(unsigned char *b) {
+    return (char *)b;
+}
+
 /* fsync to flush before close/rename. Returns 0 / -1. */
 int zsync_io_fsync(int fd) {
     return fsync(fd);

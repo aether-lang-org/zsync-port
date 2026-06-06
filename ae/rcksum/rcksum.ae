@@ -1,0 +1,613 @@
+// SPDX-FileCopyrightText: 2004,2005,2007,2009,2025,2026 Colin Phipps <cph@moria.org.uk>
+// SPDX-License-Identifier: Artistic-2.0
+//
+// Port of internal/rcksum: types.go + rcksum.go + hash.go + submit.go —
+// the rsync rolling-checksum block-matching engine. Finds target blocks
+// inside arbitrary source data and scatters them into the output file.
+//
+// Storage choices vs. the Go original:
+//   - blockHashes []hashEntry  -> std.list of *HashEntry
+//   - rsumHash map[uint32]BlockID -> std.map keyed by the decimal string
+//     of the uint32 hash, value = boxed BlockID (+1, so 0 means absent)
+//   - bitHash []byte -> mutable byte buffer (fileio.buf_*)
+// Single-threaded (the Go mutex is dropped — the Aether port drives this
+// from one actor/flow; concurrency is handled above by fanning out HTTP
+// range fetches that each call submit on disjoint offsets, serialized).
+
+import std.string (*)
+import std.list (*)
+import std.map (*)
+import rcksum.checksums
+import rcksum.ranges
+import rcksum.fileio
+
+extern malloc(size: int) -> ptr
+
+// A heap int cell, for boxing BlockIDs as map values.
+struct IntCell {
+    v: int
+}
+
+NO_BLOCK() -> int {
+    return 0 - 1
+}
+
+BITHASH_BITS() -> int {
+    return 3
+}
+
+// One target block's stored checksums + hash-chain link.
+struct HashEntry {
+    next: int       // next BlockID in this rsum's chain, or NO_BLOCK
+    rsum_a: int     // masked to rsumAMask already
+    rsum_b: int
+    md4: string     // full 16-byte MD4 (compared truncated to checksum_bytes)
+}
+
+struct Stats {
+    hash_hit: int
+    weak_hit: int
+    strong_hit: int
+    checksummed: int
+}
+
+struct RcksumState {
+    blocks: int          // number of target blocks
+    block_size: int
+    block_shift: int     // log2(block_size)
+    rsum_a_mask: int
+    rsum_bits: int
+    checksum_bytes: int  // bytes of MD4 actually compared
+    seq_matches: int
+    context: int         // block_size * seq_matches
+
+    skip: int            // skip forward on next submit_source_data
+
+    block_hashes: ptr    // std.list of *HashEntry, length == blocks
+    rsum_hash: ptr       // std.map uint32-as-string -> boxed (BlockID+1)
+    bit_hash: ptr        // byte buffer, or null until built
+    bit_hash_mask: int
+    bit_hash_len: int
+
+    known: ptr           // *BlockRanges
+
+    // current rolling checksums r[0], r[1] — held as ptr (cross-module
+    // struct types can't be field types yet); they are *checksums.RSum.
+    r0: ptr
+    r1: ptr
+
+    stats: *Stats
+
+    fd: int              // output file descriptor (positional writes)
+}
+
+// ---- boxing helpers for map values (BlockID stored as +1) ----
+box_int(v: int) -> ptr {
+    raw = malloc(8)
+    p = raw as *IntCell
+    p.v = v
+    return p
+}
+
+unbox_int(p: ptr) -> int {
+    c = p as *IntCell
+    return c.v
+}
+
+// ---- accessors into block_hashes ----
+entry_at(z: *RcksumState, b: int) -> *HashEntry {
+    return list_get_raw(z.block_hashes, b) as *HashEntry
+}
+
+new_entry() -> *HashEntry {
+    raw = malloc(48)
+    e = raw as *HashEntry
+    e.next = NO_BLOCK()
+    e.rsum_a = 0
+    e.rsum_b = 0
+    e.md4 = ""
+    return e
+}
+
+// New: construct state. rsum_bytes 1..4, checksum_bytes 3..16,
+// seq_matches 1..2, block_size a power of two.
+new(nblocks: int, block_size: int, rsum_bytes: int, checksum_bytes: int, seq_matches: int) -> *RcksumState {
+    raw = malloc(160)
+    z = raw as *RcksumState
+    z.blocks = nblocks
+    z.block_size = block_size
+    z.checksum_bytes = checksum_bytes
+    z.seq_matches = seq_matches
+    z.context = block_size * seq_matches
+    z.skip = 0
+    z.bit_hash = null
+    z.bit_hash_mask = 0
+    z.bit_hash_len = 0
+    z.rsum_hash = null
+    z.fd = 0 - 1
+
+    if rsum_bytes < 3 {
+        z.rsum_a_mask = 0
+    } else if rsum_bytes == 3 {
+        z.rsum_a_mask = 0xff
+    } else {
+        z.rsum_a_mask = 0xffff
+    }
+    z.rsum_bits = rsum_bytes * 8
+
+    // block_shift = log2(block_size)
+    z.block_shift = checksums.log2(block_size)
+
+    // allocate blocks empty hash entries
+    z.block_hashes = list_new()
+    i = 0
+    while i < nblocks {
+        list_add_raw(z.block_hashes, new_entry())
+        i = i + 1
+    }
+
+    z.known = ranges.ranges_as_ptr(ranges.new_ranges())
+
+    z.r0 = checksums.rsum_as_ptr(checksums.new_rsum(0, 0))
+    z.r1 = checksums.rsum_as_ptr(checksums.new_rsum(0, 0))
+
+    sraw = malloc(32)
+    st = sraw as *Stats
+    st.hash_hit = 0
+    st.weak_hit = 0
+    st.strong_hit = 0
+    st.checksummed = 0
+    z.stats = st
+
+    return z
+}
+
+set_target_fd(z: *RcksumState, fd: int) {
+    z.fd = fd
+}
+
+// AddTargetBlock: store the stored hashes for block b.
+add_target_block(z: *RcksumState, b: int, rsum_a: int, rsum_b: int, md4: string) {
+    if b < z.blocks {
+        e = entry_at(z, b)
+        e.md4 = md4
+        e.rsum_a = rsum_a & z.rsum_a_mask
+        e.rsum_b = rsum_b & 0xffff
+        // invalidate hash tables
+        z.rsum_hash = null
+        z.bit_hash = null
+    }
+}
+
+blocks_todo(z: *RcksumState) -> int {
+    return z.blocks - ranges.got_blocks(z.known)
+}
+
+// calcRhash for consecutive entries starting at b.
+calc_rhash(z: *RcksumState, b: int) -> int {
+    e1 = entry_at(z, b)
+    rs1 = checksums.new_rsum(e1.rsum_a, e1.rsum_b)
+    if z.seq_matches > 1 {
+        e2 = entry_at(z, b + 1)
+        rs2 = checksums.new_rsum(e2.rsum_a, e2.rsum_b)
+        return checksums.calc_rhash_from_rsums(rs1, rs2, z.seq_matches, z.rsum_a_mask)
+    }
+    return checksums.calc_rhash_from_rsums(rs1, rs1, z.seq_matches, z.rsum_a_mask)
+}
+
+// map key for a uint32 hash
+hkey(h: int) -> string {
+    return string_from_int(h & 0xffffffff)
+}
+
+rsum_hash_get(z: *RcksumState, h: int) -> int {
+    v = map_get_raw(z.rsum_hash, hkey(h))
+    if v == null {
+        return NO_BLOCK()
+    }
+    return unbox_int(v) - 1
+}
+
+rsum_hash_put(z: *RcksumState, h: int, id: int) {
+    map_put_raw(z.rsum_hash, hkey(h), box_int(id + 1))
+}
+
+rsum_hash_del(z: *RcksumState, h: int) {
+    map_remove(z.rsum_hash, hkey(h))
+}
+
+// buildHash: build rsumHash + bitHash.
+build_hash(z: *RcksumState) {
+    z.rsum_hash = map_new()
+
+    bit_hash_bits = checksums.log2(z.blocks) + BITHASH_BITS()
+    z.bit_hash_mask = (1 << bit_hash_bits) - 1
+    z.bit_hash_len = (z.bit_hash_mask + 1 + 7) >> 3
+    z.bit_hash = fileio.buf_alloc(z.bit_hash_len)
+
+    // fill in reverse so chains keep blocks in ascending order
+    id = z.blocks - z.seq_matches
+    while id >= 0 {
+        h = calc_rhash(z, id)
+        nxt = rsum_hash_get(z, h)
+        e = entry_at(z, id)
+        e.next = nxt
+        rsum_hash_put(z, h, id)
+
+        bit_idx = (h & z.bit_hash_mask) >> 3
+        bit_pos = h & 7
+        if bit_idx < z.bit_hash_len {
+            fileio.buf_or(z.bit_hash, bit_idx, 1 << bit_pos)
+        }
+        id = id - 1
+    }
+}
+
+// removeBlockFromHash
+remove_block_from_hash(z: *RcksumState, id: int) {
+    if z.rsum_hash == null {
+        return
+    }
+    if id >= z.blocks - (z.seq_matches - 1) {
+        return
+    }
+    h = calc_rhash(z, id)
+    p = rsum_hash_get(z, h)
+    if p == id {
+        e = entry_at(z, id)
+        nxt = e.next
+        if nxt != NO_BLOCK() {
+            rsum_hash_put(z, h, nxt)
+        } else {
+            rsum_hash_del(z, h)
+        }
+    } else if p != NO_BLOCK() {
+        while p != NO_BLOCK() {
+            pe = entry_at(z, p)
+            if pe.next == id {
+                pe.next = entry_at(z, id).next
+                p = NO_BLOCK()
+            } else {
+                p = pe.next
+            }
+        }
+    }
+    entry_at(z, id).next = NO_BLOCK()
+}
+
+// neededBlockRanges over [0, blocks-1] -> *BlockPair list
+needed_block_ranges(z: *RcksumState) -> ptr {
+    return ranges.missing_blocks_between(z.known, 0, z.blocks - 1)
+}
+
+stats_of(z: *RcksumState) -> *Stats {
+    return z.stats
+}
+
+// Compare the first `n` bytes of two length-aware buffers.
+// a/b are at least `n` bytes. Returns 1 if equal, 0 otherwise.
+prefix_eq(a: string, a_len: int, b: string, b_len: int, n: int) -> int {
+    i = 0
+    while i < n {
+        ca = string_char_at_n(a, a_len, i) & 0xff
+        cb = string_char_at_n(b, b_len, i) & 0xff
+        if ca != cb {
+            return 0
+        }
+        i = i + 1
+    }
+    return 1
+}
+
+// writeBlocks: write data (covering blocks bfrom..bto) to the file and
+// mark them obtained. `next` is the caller's current hash-chain cursor,
+// returned (possibly advanced) so the caller can continue after entries
+// were wiped. data is `data_len` bytes covering exactly (bto+1-bfrom)
+// blocks starting at data offset 0.
+write_blocks(z: *RcksumState, data: string, data_len: int, bfrom: int, bto: int, next: int) -> int {
+    span = (bto + 1 - bfrom) << z.block_shift
+    offset = bfrom << z.block_shift
+    fileio.write_at(z.fd, data, span, offset)
+
+    id = bfrom
+    while id <= bto {
+        if id == next {
+            next = entry_at(z, id).next
+        }
+        ranges.add_to_ranges(z.known, id)
+        if z.seq_matches == 2 {
+            if id != bto {
+                remove_block_from_hash(z, id)
+            } else if ranges.contains(z.known, bto + 1) == 1 {
+                remove_block_from_hash(z, id)
+            }
+        }
+        id = id + 1
+    }
+    if z.seq_matches == 2 {
+        if bfrom > 0 {
+            if ranges.contains(z.known, bfrom - 1) == 1 {
+                remove_block_from_hash(z, bfrom - 1)
+            }
+        }
+    }
+    return next
+}
+
+// SubmitBlocks: accept fetched target data for blocks bfrom..bto whose
+// MD4 matches. data covers (bto-bfrom+1) full blocks. Finds the highest
+// index x with all of bfrom..x-1 matching, then writes that prefix.
+submit_blocks(z: *RcksumState, data: string, data_len: int, bfrom: int, bto: int) {
+    if z.rsum_hash == null {
+        build_hash(z)
+    }
+    x = bfrom
+    while x <= bto {
+        off = (x - bfrom) << z.block_shift
+        block = string_substring(data, off, off + z.block_size)
+        md = checksums.calc_checksum(block, z.block_size)
+        stored = entry_at(z, x).md4
+        if prefix_eq(md, 16, stored, 16, z.checksum_bytes) == 0 {
+            break
+        }
+        x = x + 1
+    }
+    // Write blocks bfrom..x-1 (the matching prefix). If none matched
+    // (x == bfrom) the span is zero — write nothing.
+    if x > bfrom {
+        span_len = (x - bfrom) << z.block_shift
+        prefix = string_substring(data, 0, span_len)
+        write_blocks(z, prefix, span_len, bfrom, x - 1, NO_BLOCK())
+    }
+}
+
+// matchBlock: probe the hash tables for the current rolling checksums
+// (z.r0/z.r1) against candidate data at offset `doff` in buffer `data`.
+// Returns the number of blocks matched (and written).
+match_block(z: *RcksumState, data: string, data_len: int, doff: int) -> int {
+    h = checksums.calc_rhash_from_rsums(z.r0, z.r1, z.seq_matches, z.rsum_a_mask)
+
+    bit_idx = (h & z.bit_hash_mask) >> 3
+    bit_pos = h & 7
+    if z.bit_hash == null {
+        return 0
+    }
+    if bit_idx >= z.bit_hash_len {
+        return 0
+    }
+    bv = fileio.buf_get(z.bit_hash, bit_idx)
+    if (bv & (1 << bit_pos)) == 0 {
+        return 0
+    }
+    e = rsum_hash_get(z, h)
+    if e == NO_BLOCK() {
+        return 0
+    }
+    return check_chain(z, e, data, data_len, doff)
+}
+
+// checkChecksumsOnHashChain: walk the hash chain from block `id`,
+// confirm weak then strong checksums for seq_matches consecutive
+// blocks, write matches. Returns blocks matched.
+check_chain(z: *RcksumState, id: int, data: string, data_len: int, doff: int) -> int {
+    got = 0
+    // md4 cache for up to seq_matches candidate blocks (computed lazily)
+    md_cache0 = ""
+    md_cache1 = ""
+    cached = 0          // how many of md_cache0/1 are valid
+
+    next = id
+    while next != NO_BLOCK() {
+        id = next
+        next = entry_at(z, id).next
+
+        z.stats.hash_hit = z.stats.hash_hit + 1
+        e0 = entry_at(z, id)
+        if e0.rsum_a != (checksums.rsum_a(z.r0) & z.rsum_a_mask) {
+            continue
+        }
+        if e0.rsum_b != checksums.rsum_b(z.r0) {
+            continue
+        }
+        if z.seq_matches > 1 {
+            e1 = entry_at(z, id + 1)
+            if e1.rsum_a != (checksums.rsum_a(z.r1) & z.rsum_a_mask) {
+                continue
+            }
+            if e1.rsum_b != checksums.rsum_b(z.r1) {
+                continue
+            }
+        }
+        z.stats.weak_hit = z.stats.weak_hit + 1
+
+        // strong checksums for seq_matches consecutive blocks
+        matching = 0
+        checkmd4 = 0
+        while checkmd4 < z.seq_matches {
+            if checkmd4 >= cached {
+                boff = doff + checkmd4 * z.block_size
+                if boff + z.block_size > data_len {
+                    break
+                }
+                block = string_substring(data, boff, boff + z.block_size)
+                md = checksums.calc_checksum(block, z.block_size)
+                if checkmd4 == 0 {
+                    md_cache0 = md
+                } else {
+                    md_cache1 = md
+                }
+                cached = cached + 1
+                z.stats.checksummed = z.stats.checksummed + 1
+            }
+            cand = md_cache0
+            if checkmd4 == 1 {
+                cand = md_cache1
+            }
+            stored = entry_at(z, id + checkmd4).md4
+            if prefix_eq(cand, 16, stored, 16, z.checksum_bytes) == 1 {
+                matching = matching + 1
+            } else {
+                break
+            }
+            checkmd4 = checkmd4 + 1
+        }
+
+        if matching < z.seq_matches {
+            continue
+        }
+
+        z.stats.strong_hit = z.stats.strong_hit + matching
+        next_known = ranges.next_contained_after(z.known, id)
+        if next_known == -1 {
+            next_known = z.blocks
+        }
+        num_write = matching
+        if next_known < id + matching {
+            num_write = next_known - id
+        }
+
+        span_len = num_write * z.block_size
+        prefix = string_substring(data, doff, doff + span_len)
+        next = write_blocks(z, prefix, span_len, id, id + num_write - 1, next)
+        got = got + num_write
+    }
+    return got
+}
+
+// submitSourceData: scan `data` (data_len bytes, starting at source
+// offset `offset`) for target blocks. Conserves z.r0/z.r1 and z.skip
+// across calls per the Go contract.
+submit_source_data(z: *RcksumState, data: string, data_len: int, offset: int) -> int {
+    x = 0
+    got = 0
+    x_limit = data_len - z.context
+
+    if offset != 0 {
+        x = z.skip
+    }
+    z.skip = 0
+
+    if x != 0 {
+        z.r0 = checksums.rsum_as_ptr(checksums.calc_rsum_block(data, data_len, x, z.block_size))
+        if z.seq_matches > 1 {
+            z.r1 = checksums.rsum_as_ptr(checksums.calc_rsum_block(data, data_len, x + z.block_size, z.block_size))
+        }
+    } else if offset == 0 {
+        z.r0 = checksums.rsum_as_ptr(checksums.calc_rsum_block(data, data_len, x, z.block_size))
+        if z.seq_matches > 1 {
+            z.r1 = checksums.rsum_as_ptr(checksums.calc_rsum_block(data, data_len, x + z.block_size, z.block_size))
+        }
+    }
+
+    while x < x_limit {
+        blocks_matched = 0
+        while blocks_matched == 0 {
+            if x >= x_limit {
+                break
+            }
+            thismatch = match_block(z, data, data_len, x)
+            if thismatch > 0 {
+                blocks_matched = z.seq_matches
+                got = got + thismatch
+            }
+            if blocks_matched == 0 {
+                if x + z.block_size * z.seq_matches < data_len {
+                    old_c = string_char_at_n(data, data_len, x) & 0xff
+                    new_c = string_char_at_n(data, data_len, x + z.block_size) & 0xff
+                    checksums.update_rsum(z.r0, old_c, new_c, z.block_shift)
+                    if z.seq_matches > 1 {
+                        old1 = string_char_at_n(data, data_len, x + z.block_size) & 0xff
+                        new1 = string_char_at_n(data, data_len, x + 2 * z.block_size) & 0xff
+                        checksums.update_rsum(z.r1, old1, new1, z.block_shift)
+                    }
+                }
+                x = x + 1
+            }
+        }
+
+        if blocks_matched > 0 {
+            x = x + z.block_size * blocks_matched
+            if x <= x_limit {
+                if z.seq_matches > 1 {
+                    if blocks_matched == 1 {
+                        z.r0 = z.r1
+                    } else if x + z.block_size <= data_len {
+                        z.r0 = checksums.rsum_as_ptr(checksums.calc_rsum_block(data, data_len, x, z.block_size))
+                    }
+                } else if x + z.block_size <= data_len {
+                    z.r0 = checksums.rsum_as_ptr(checksums.calc_rsum_block(data, data_len, x, z.block_size))
+                }
+                if z.seq_matches > 1 {
+                    if x + 2 * z.block_size <= data_len {
+                        z.r1 = checksums.rsum_as_ptr(checksums.calc_rsum_block(data, data_len, x + z.block_size, z.block_size))
+                    }
+                }
+            }
+        }
+    }
+
+    z.skip = x - x_limit
+    return got
+}
+
+// submit_source_buffer: match an entire in-memory source buffer in one
+// shot. This is the single-buffer specialization of Go's
+// SubmitSourceFile for inputs that fit in memory (seed files in the
+// zsync client are read whole). Replicates SubmitSourceFile's tail
+// padding: the buffer is zero-extended by `context` bytes (capped at
+// blocksize*16) so the rolling window can run off the end. Returns the
+// number of blocks matched.
+submit_source_buffer(z: *RcksumState, data: string, data_len: int) -> int {
+    if z.rsum_hash == null {
+        build_hash(z)
+    }
+    buf_size = z.block_size * 16
+
+    // Zero-pad: Go copies data_len bytes then appends context zero
+    // bytes, capped at buf_size. We mirror that effective length.
+    eff = data_len
+    if data_len < buf_size {
+        eff = data_len + z.context
+        if eff > buf_size {
+            eff = buf_size
+        }
+    }
+    // Build the padded buffer (only when padding is needed).
+    padded = data
+    if eff > data_len {
+        zeros = make_zeros(eff - data_len)
+        padded = append_bytes(data, data_len, zeros, eff - data_len)
+    }
+    return submit_source_data(z, padded, eff, 0)
+}
+
+// Build a buffer of `n` zero bytes (length-aware).
+make_zeros(n: int) -> string {
+    return fileio.buf_alloc_str(n)
+}
+
+// Concatenate two length-aware byte buffers (binary-safe — does NOT use
+// string_concat which would truncate at the first NUL).
+append_bytes(a: string, a_len: int, b: string, b_len: int) -> string {
+    total = a_len + b_len
+    out = fileio.buf_alloc(total)
+    i = 0
+    while i < a_len {
+        fileio.buf_set(out, i, string_char_at_n(a, a_len, i) & 0xff)
+        i = i + 1
+    }
+    j = 0
+    while j < b_len {
+        fileio.buf_set(out, a_len + j, string_char_at_n(b, b_len, j) & 0xff)
+        j = j + 1
+    }
+    return fileio.buf_to_str(out, total)
+}
+
+// ReadKnownData: read `len` bytes from the output file at `offset`.
+read_known_data(z: *RcksumState, len: int, offset: int) -> (string, int) {
+    if z.fd < 0 {
+        return "", 0
+    }
+    return fileio.read_at(z.fd, len, offset)
+}

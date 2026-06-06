@@ -1,0 +1,2459 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+#include <stdatomic.h>
+#include <stdint.h>
+#include <time.h>
+#include <setjmp.h>
+#include "aether_panic.h"
+#include "aether_stringseq.h"
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#include <io.h>      // _setmode, _fileno
+#include <fcntl.h>   // _O_BINARY
+#elif defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#else
+#include <unistd.h>
+#include <sched.h>
+#endif
+#ifdef _WIN32
+#  define aether_aligned_alloc(align, size) _aligned_malloc((size), (align))
+#else
+#  define aether_aligned_alloc(align, size) aligned_alloc((align), (size))
+#endif
+#ifndef likely
+#  if defined(__GNUC__) || defined(__clang__)
+#    define likely(x)   __builtin_expect(!!(x), 1)
+#    define unlikely(x) __builtin_expect(!!(x), 0)
+#  else
+#    define likely(x)   (x)
+#    define unlikely(x) (x)
+#  endif
+#endif
+#ifndef AETHER_GCC_COMPAT
+#  if (defined(__GNUC__) || defined(__clang__)) && !defined(__EMSCRIPTEN__)
+#    define AETHER_GCC_COMPAT 1
+#  else
+#    define AETHER_GCC_COMPAT 0
+#  endif
+#endif
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+#endif
+#ifdef _WIN32
+static inline int64_t _aether_clock_ns(void) {
+    LARGE_INTEGER freq, now;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&now);
+    return (int64_t)((double)now.QuadPart / freq.QuadPart * 1000000000.0);
+}
+#elif defined(__EMSCRIPTEN__)
+static inline int64_t _aether_clock_ns(void) {
+    return (int64_t)(emscripten_get_now() * 1000000.0);
+}
+#elif defined(__STDC_HOSTED__) && (__STDC_HOSTED__ == 0)
+static inline int64_t _aether_clock_ns(void) { return 0; }
+#else
+static inline int64_t _aether_clock_ns(void) {
+    struct timespec _ts;
+    clock_gettime(CLOCK_MONOTONIC, &_ts);
+    return (int64_t)_ts.tv_sec * 1000000000LL + _ts.tv_nsec;
+}
+#endif
+#include <string.h>
+#include <stdlib.h>
+#include <stddef.h>
+extern void* aether_caps_malloc(size_t bytes);
+static inline const char* aether_uniform_heap_str(const char* s, int is_heap) {
+    if (!s) return (const char*)0;
+    if (is_heap) return s;
+    /* AetherString-aware length probe — see is_aether_string in
+     * std/string/aether_string.h. Byte-by-byte to stay ASan-clean
+     * on short literal allocations (e.g. "x"). */
+    const unsigned char* _p = (const unsigned char*)s;
+    const char* _data = s;
+    size_t _n;
+    if (_p[0] == 0xDE && _p[1] == 0xC0 && _p[2] == 0x57 && _p[3] == 0xAE) {
+        /* Struct layout: magic(u32), ref_count(i32), length(size_t),
+         * capacity(size_t), data(char*). Read length and data via
+         * a typed view — the struct's data pointer is what we copy. */
+        struct _AeStrHdr { unsigned int magic; int ref_count; size_t length; size_t capacity; char* data; };
+        const struct _AeStrHdr* _h = (const struct _AeStrHdr*)s;
+        _n = _h->length;
+        _data = _h->data ? _h->data : s;
+    } else {
+        _n = strlen(s);
+    }
+    char* _d = (char*)aether_caps_malloc(_n + 1);
+    if (!_d) return (const char*)0;
+    if (_n) memcpy(_d, _data, _n);
+    _d[_n] = '\0';
+    return (const char*)_d;
+}
+extern void string_release(const char*);
+static inline void aether_heap_str_free(const char* s) {
+    if (!s) return;
+    const unsigned char* _hp = (const unsigned char*)s;
+    if (_hp[0] == 0xDE && _hp[1] == 0xC0 && _hp[2] == 0x57 && _hp[3] == 0xAE) {
+        string_release(s);
+    } else {
+        free((void*)s);
+    }
+}
+#include <stdarg.h>
+static void* _aether_interp(const char* fmt, ...) {
+    va_list args, args2;
+    va_start(args, fmt);
+    va_copy(args2, args);
+    int len = vsnprintf(NULL, 0, fmt, args);
+    va_end(args);
+    char* str = (char*)malloc(len + 1);
+    vsnprintf(str, len + 1, fmt, args2);
+    va_end(args2);
+    return (void*)str;
+}
+extern const char* aether_string_data(const void* s);
+extern size_t aether_string_length(const void* s);
+extern void* string_new_with_length(const char* data, int length);
+extern int list_add_string_owned(void* list, void* item);
+extern int map_put_string_owned(void* map, const char* key, void* value);
+static inline const char* _aether_safe_str(const void* s) {
+    if (!s) return "(null)";
+    return aether_string_data(s);
+}
+static inline const char* _aether_duration_repr(int64_t ns) {
+    static char _buf[64];
+    int64_t abs_ns = ns < 0 ? -ns : ns;
+    struct _du { const char* suffix; int64_t scale; } units[] = {
+        {"d", 86400000000000LL}, {"h", 3600000000000LL},
+        {"m", 60000000000LL}, {"s", 1000000000LL},
+        {"ms", 1000000LL}, {"us", 1000LL}, {"ns", 1LL}
+    };
+    for (size_t i = 0; i < sizeof(units) / sizeof(units[0]); i++) {
+        if (abs_ns >= units[i].scale || units[i].scale == 1) {
+            if (ns % units[i].scale == 0) {
+                snprintf(_buf, sizeof(_buf), "%lld%s", (long long)(ns / units[i].scale), units[i].suffix);
+            } else {
+                double v = (double)ns / (double)units[i].scale;
+                snprintf(_buf, sizeof(_buf), "%.9g%s", v, units[i].suffix);
+            }
+            return _buf;
+        }
+    }
+    return "0ns";
+}
+extern void aether_sleep_ms(int ms);
+#if !AETHER_GCC_COMPAT
+static void* _aether_ref_new(intptr_t val) { intptr_t* r = malloc(sizeof(intptr_t)); *r = val; return (void*)r; }
+#endif
+typedef struct { void (*fn)(void); void* env; } _AeClosure;
+static inline void* _aether_box_closure(_AeClosure c) { _AeClosure* p = malloc(sizeof(_AeClosure)); *p = c; return (void*)p; }
+static inline _AeClosure _aether_unbox_closure(void* p) { return *(_AeClosure*)p; }
+typedef struct { _AeClosure compute; intptr_t value; int evaluated; } _AeThunk;
+static inline void* _aether_thunk_new(_AeClosure c) { _AeThunk* t = malloc(sizeof(_AeThunk)); t->compute = c; t->value = 0; t->evaluated = 0; return (void*)t; }
+static inline intptr_t _aether_thunk_force(void* p) { _AeThunk* t = (_AeThunk*)p; if (!t->evaluated) { t->value = (intptr_t)((intptr_t(*)(void*))t->compute.fn)(t->compute.env); t->evaluated = 1; } return t->value; }
+static inline void _aether_thunk_free(void* p) { if (p) free(p); }
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__) && defined(__STDC_HOSTED__) && (__STDC_HOSTED__ == 1) && !defined(__arm__) && !defined(__thumb__)
+#include <termios.h>
+static struct termios _aether_orig_termios;
+static void _aether_raw_mode(void) {
+    tcgetattr(0, &_aether_orig_termios);
+    struct termios raw = _aether_orig_termios;
+    raw.c_lflag &= ~(ICANON | ECHO);
+    tcsetattr(0, TCSANOW, &raw);
+}
+static void _aether_cooked_mode(void) {
+    tcsetattr(0, TCSANOW, &_aether_orig_termios);
+}
+#else
+static void _aether_raw_mode(void) {}
+static void _aether_cooked_mode(void) {}
+#endif
+static void* _aether_ctx_stack[64];
+static int _aether_ctx_depth = 0;
+static inline void _aether_ctx_push(void* ctx) { if (_aether_ctx_depth < 64) _aether_ctx_stack[_aether_ctx_depth++] = ctx; }
+static inline void _aether_ctx_pop(void) { if (_aether_ctx_depth > 0) _aether_ctx_depth--; }
+static inline void* _aether_ctx_get(void) { return _aether_ctx_depth > 0 ? _aether_ctx_stack[_aether_ctx_depth-1] : (void*)0; }
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+
+void aether_args_init(int argc, char** argv);
+
+
+typedef struct { const char* _0; int _1; } _tuple_string_int;
+typedef struct { const char* _0; const char* _1; } _tuple_string_string;
+typedef struct { const char* _0; int _1; const char* _2; } _tuple_string_int_string;
+
+typedef struct IntCell IntCell;
+typedef struct HashEntry HashEntry;
+typedef struct Stats Stats;
+typedef struct RcksumState RcksumState;
+typedef struct RSum RSum;
+typedef struct Harness Harness;
+typedef struct BlockPair BlockPair;
+typedef struct BlockRanges BlockRanges;
+typedef struct IntCell {
+    int v;
+} IntCell;
+
+typedef struct HashEntry {
+    int next;
+    int rsum_a;
+    int rsum_b;
+    const char* md4;
+    int _heap_md4;
+} HashEntry;
+static inline void HashEntry_destroy(HashEntry* s) {
+    if (!s) return;
+    if (s->_heap_md4) { aether_heap_str_free(s->md4); s->md4 = (const char*)0; s->_heap_md4 = 0; }
+}
+
+typedef struct Stats {
+    int hash_hit;
+    int weak_hit;
+    int strong_hit;
+    int checksummed;
+} Stats;
+
+typedef struct RcksumState {
+    int blocks;
+    int block_size;
+    int block_shift;
+    int rsum_a_mask;
+    int rsum_bits;
+    int checksum_bytes;
+    int seq_matches;
+    int context;
+    int skip;
+    void* block_hashes;
+    void* rsum_hash;
+    void* bit_hash;
+    int bit_hash_mask;
+    int bit_hash_len;
+    void* known;
+    void* r0;
+    void* r1;
+    Stats* stats;
+    int fd;
+} RcksumState;
+
+typedef struct RSum {
+    int a;
+    int b;
+} RSum;
+
+typedef struct Harness {
+    int passed;
+    int failed;
+} Harness;
+
+typedef struct BlockPair {
+    int start;
+    int fin;
+} BlockPair;
+
+typedef struct BlockRanges {
+    void* ranges;
+    int got_blocks;
+} BlockRanges;
+
+// Forward declarations
+void add_block(void*, int, const char*);
+static _tuple_string_int string_strip_prefix(const char*, const char*);
+static _tuple_string_string cryptography_base64_encode_padded(const char*, int);
+static _tuple_string_int_string cryptography_md4_bytes(const char*, int);
+static int rcksum_NO_BLOCK(void);
+static int rcksum_BITHASH_BITS(void);
+static void* rcksum_box_int(int);
+static int rcksum_unbox_int(void*);
+static HashEntry* rcksum_entry_at(RcksumState*, int);
+static HashEntry* rcksum_new_entry(void);
+static RcksumState* rcksum_new(int, int, int, int, int);
+static void rcksum_set_target_fd(RcksumState*, int);
+static void rcksum_add_target_block(RcksumState*, int, int, int, const char*);
+static int rcksum_blocks_todo(RcksumState*);
+static int rcksum_calc_rhash(RcksumState*, int);
+static const char* rcksum_hkey(int);
+static int rcksum_rsum_hash_get(RcksumState*, int);
+static void rcksum_rsum_hash_put(RcksumState*, int, int);
+static void rcksum_rsum_hash_del(RcksumState*, int);
+static void rcksum_build_hash(RcksumState*);
+static void rcksum_remove_block_from_hash(RcksumState*, int);
+static int rcksum_prefix_eq(const char*, int, const char*, int, int);
+static int rcksum_write_blocks(RcksumState*, const char*, int, int, int, int);
+static void rcksum_submit_blocks(RcksumState*, const char*, int, int, int);
+static int rcksum_match_block(RcksumState*, const char*, int, int);
+static int rcksum_check_chain(RcksumState*, int, const char*, int, int);
+static int rcksum_submit_source_data(RcksumState*, const char*, int, int);
+static int rcksum_submit_source_buffer(RcksumState*, const char*, int);
+static const char* rcksum_make_zeros(int);
+static const char* rcksum_append_bytes(const char*, int, const char*, int);
+static _tuple_string_int rcksum_read_known_data(RcksumState*, int, int);
+static RSum* checksums_new_rsum(int, int);
+static void* checksums_rsum_as_ptr(RSum*);
+static int checksums_rsum_a(RSum*);
+static int checksums_rsum_b(RSum*);
+static RSum* checksums_calc_rsum_block(const char*, int, int, int);
+static void checksums_update_rsum(RSum*, int, int, int);
+static const char* checksums_calc_checksum(const char*, int);
+static int checksums_byte_at(const char*, int, int);
+static int checksums_calc_rhash_from_rsums(RSum*, RSum*, int, int);
+static int checksums_log2(int);
+static int fileio_open_rw(const char*);
+static int fileio_write_at(int, const char*, int, int);
+static _tuple_string_int fileio_read_at(int, int, int);
+static int fileio_close_fd(int);
+static int fileio_sync_fd(int);
+static void* fileio_buf_alloc(int);
+static const char* fileio_buf_alloc_str(int);
+static int fileio_buf_get(void*, int);
+static void fileio_buf_set(void*, int, int);
+static void fileio_buf_or(void*, int, int);
+static const char* fileio_buf_to_str(void*, int);
+static Harness* assert_new(void);
+static void assert_ok(Harness*, int, const char*);
+static void assert_eq_int(Harness*, int, int, const char*);
+static void assert_eq_str(Harness*, const char*, const char*, const char*);
+static void assert_report(Harness*);
+static BlockPair* ranges_new_pair(int, int);
+static int ranges_pair_start(BlockPair*);
+static int ranges_pair_fin(BlockPair*);
+static BlockRanges* ranges_new_ranges(void);
+static void* ranges_ranges_as_ptr(BlockRanges*);
+static int ranges_got_blocks(BlockRanges*);
+static int ranges_range_start_at(BlockRanges*, int);
+static int ranges_range_fin_at(BlockRanges*, int);
+static BlockPair* ranges_pair_at(BlockRanges*, int);
+static void ranges_insert_pair(BlockRanges*, int, BlockPair*);
+static int ranges_range_before_block(BlockRanges*, int);
+static void ranges_add_to_ranges(BlockRanges*, int);
+static int ranges_contains(BlockRanges*, int);
+static int ranges_next_contained_after(BlockRanges*, int);
+static int ranges_list_len(void*);
+
+// Extern C function: string_new
+void* string_new(const char*);
+
+// Extern C function: string_from_cstr
+void* string_from_cstr(const char*);
+
+// Extern C function: string_from_literal
+void* string_from_literal(const char*);
+
+// Extern C function: string_new_with_length
+void* string_new_with_length(const char*, int);
+
+// Extern C function: string_empty
+void* string_empty(void);
+
+// Extern C function: string_retain
+void string_retain(const char*);
+
+// Extern C function: string_release
+void string_release(const char*);
+
+// Extern C function: string_free
+void string_free(const char*);
+
+// Extern C function: string_concat
+const char* string_concat(const char*, const char*);
+
+// Extern C function: string_concat_wrapped
+void* string_concat_wrapped(const char*, const char*);
+
+// Extern C function: string_length
+int string_length(const char*);
+
+// Extern C function: string_char_at
+int string_char_at(const char*, int);
+
+// Extern C function: string_equals
+int string_equals(const char*, const char*);
+
+// Extern C function: string_compare
+int string_compare(const char*, const char*);
+
+// Extern C function: string_starts_with
+int string_starts_with(const char*, const char*);
+
+// Extern C function: string_ends_with
+int string_ends_with(const char*, const char*);
+
+// Extern C function: string_contains
+int string_contains(const char*, const char*);
+
+// Extern C function: string_index_of
+int string_index_of(const char*, const char*);
+
+// Extern C function: string_index_of_from
+int string_index_of_from(const char*, const char*, int);
+
+// Extern C function: string_substring
+const char* string_substring(const char*, int, int);
+
+// Extern C function: string_substring_n
+const char* string_substring_n(const char*, int, int, int);
+
+// Extern C function: string_length_n
+int string_length_n(const char*, int);
+
+// Extern C function: string_char_at_n
+int string_char_at_n(const char*, int, int);
+
+// Extern C function: string_index_of_from_n
+int string_index_of_from_n(const char*, int, const char*, int);
+
+// Extern C function: string_from_char
+void* string_from_char(int);
+
+// Extern C function: string_to_upper
+const char* string_to_upper(const char*);
+
+// Extern C function: string_to_lower
+const char* string_to_lower(const char*);
+
+// Extern C function: string_trim
+const char* string_trim(const char*);
+
+// Extern C function: string_split
+void* string_split(const char*, const char*);
+
+// Extern C function: string_array_size
+int string_array_size(void*);
+
+// Extern C function: string_array_get
+void* string_array_get(void*, int);
+
+// Extern C function: string_array_free
+void string_array_free(void*);
+
+// Extern C function: string_split_to_seq
+StringSeq* string_split_to_seq(const char*, const char*);
+
+// Extern C function: string_seq_empty
+StringSeq* string_seq_empty(void);
+
+// Extern C function: string_seq_cons
+StringSeq* string_seq_cons(const char*, StringSeq*);
+
+// Extern C function: string_seq_head
+const char* string_seq_head(StringSeq*);
+
+// Extern C function: string_seq_tail
+StringSeq* string_seq_tail(StringSeq*);
+
+// Extern C function: string_seq_is_empty
+int string_seq_is_empty(StringSeq*);
+
+// Extern C function: string_seq_length
+int string_seq_length(StringSeq*);
+
+// Extern C function: string_seq_retain
+StringSeq* string_seq_retain(StringSeq*);
+
+// Extern C function: string_seq_free
+void string_seq_free(StringSeq*);
+
+// Extern C function: string_seq_from_array
+StringSeq* string_seq_from_array(void*, int);
+
+// Extern C function: string_seq_to_array
+void* string_seq_to_array(StringSeq*);
+
+// Extern C function: string_seq_reverse
+StringSeq* string_seq_reverse(StringSeq*);
+
+// Extern C function: string_seq_concat
+StringSeq* string_seq_concat(StringSeq*, StringSeq*);
+
+// Extern C function: string_seq_take
+StringSeq* string_seq_take(StringSeq*, int);
+
+// Extern C function: string_seq_drop
+StringSeq* string_seq_drop(StringSeq*, int);
+
+// Extern C function: string_to_cstr
+const char* string_to_cstr(const char*);
+
+// Extern C function: string_from_int
+void* string_from_int(int);
+
+// Extern C function: string_from_long
+void* string_from_long(int64_t);
+
+// Extern C function: string_from_float
+void* string_from_float(double);
+
+// Extern C function: string_from_int_radix
+void* string_from_int_radix(int64_t, int);
+
+// Extern C function: string_pad_start
+void* string_pad_start(const char*, int, int);
+
+// Extern C function: string_pad_end
+void* string_pad_end(const char*, int, int);
+
+// Extern C function: string_to_int_raw
+int string_to_int_raw(const char*, void*);
+
+// Extern C function: string_to_long_raw
+int string_to_long_raw(const char*, void*);
+
+// Extern C function: string_to_float_raw
+int string_to_float_raw(const char*, void*);
+
+// Extern C function: string_to_double_raw
+int string_to_double_raw(const char*, void*);
+
+// Extern C function: string_to_int_radix_raw
+int string_to_int_radix_raw(const char*, int, void*);
+
+// Extern C function: string_try_int
+int string_try_int(const char*);
+
+// Extern C function: string_get_int
+int string_get_int(const char*);
+
+// Extern C function: string_try_long
+int string_try_long(const char*);
+
+// Extern C function: string_get_long
+int64_t string_get_long(const char*);
+
+// Extern C function: string_try_float
+int string_try_float(const char*);
+
+// Extern C function: string_get_float
+double string_get_float(const char*);
+
+// Extern C function: string_try_double
+int string_try_double(const char*);
+
+// Extern C function: string_get_double
+double string_get_double(const char*);
+
+// Extern C function: string_try_int_radix
+int string_try_int_radix(const char*, int);
+
+// Extern C function: string_get_int_radix
+int64_t string_get_int_radix(const char*, int);
+
+// Extern C function: string_format_list
+void* string_format_list(const char*, void*);
+
+// Extern C function: string_glob_match_raw
+int string_glob_match_raw(const char*, const char*, int);
+
+// Extern C function: cryptography_sha1_hex_raw
+const char* cryptography_sha1_hex_raw(const char*, int);
+
+// Extern C function: cryptography_sha256_hex_raw
+const char* cryptography_sha256_hex_raw(const char*, int);
+
+// Extern C function: cryptography_hash_hex_raw
+const char* cryptography_hash_hex_raw(const char*, const char*, int);
+
+// Extern C function: cryptography_hash_supported
+int cryptography_hash_supported(const char*);
+
+// Extern C function: cryptography_base64_encode_raw
+const char* cryptography_base64_encode_raw(const char*, int);
+
+// Extern C function: cryptography_base64_encode_padded_raw
+const char* cryptography_base64_encode_padded_raw(const char*, int);
+
+// Extern C function: cryptography_base64_decode_raw
+int cryptography_base64_decode_raw(const char*);
+
+// Extern C function: cryptography_get_base64_decode
+const char* cryptography_get_base64_decode(void);
+
+// Extern C function: cryptography_get_base64_decode_length
+int cryptography_get_base64_decode_length(void);
+
+// Extern C function: cryptography_release_base64_decode
+void cryptography_release_base64_decode(void);
+
+// Extern C function: cryptography_md4_hex_raw
+const char* cryptography_md4_hex_raw(const char*, int);
+
+// Extern C function: cryptography_md5_hex_raw
+const char* cryptography_md5_hex_raw(const char*, int);
+
+// Extern C function: cryptography_hmac_sha256_hex_raw
+const char* cryptography_hmac_sha256_hex_raw(const char*, int, const char*, int);
+
+// Extern C function: cryptography_hmac_sha256_bytes_raw
+int cryptography_hmac_sha256_bytes_raw(const char*, int, const char*, int);
+
+// Extern C function: cryptography_md4_bytes_raw
+int cryptography_md4_bytes_raw(const char*, int);
+
+// Extern C function: cryptography_md5_bytes_raw
+int cryptography_md5_bytes_raw(const char*, int);
+
+// Extern C function: cryptography_sha1_bytes_raw
+int cryptography_sha1_bytes_raw(const char*, int);
+
+// Extern C function: cryptography_sha256_bytes_raw
+int cryptography_sha256_bytes_raw(const char*, int);
+
+// Extern C function: cryptography_hash_bytes_raw
+int cryptography_hash_bytes_raw(const char*, const char*, int);
+
+// Extern C function: cryptography_get_binary_digest
+const char* cryptography_get_binary_digest(void);
+
+// Extern C function: cryptography_get_binary_digest_length
+int cryptography_get_binary_digest_length(void);
+
+// Extern C function: cryptography_release_binary_digest
+void cryptography_release_binary_digest(void);
+
+// Extern C function: string_new_with_length
+void* string_new_with_length(const char*, int);
+
+// Extern C function: malloc (libc-provided, declaration skipped)
+// Extern C function: malloc (libc-provided, declaration skipped)
+// Extern C function: free (libc-provided, declaration skipped)
+// Extern C function: malloc (libc-provided, declaration skipped)
+// Extern C function: zsync_io_open_rw_trunc
+int zsync_io_open_rw_trunc(const char*);
+
+// Extern C function: zsync_io_open_ro
+int zsync_io_open_ro(const char*);
+
+// Extern C function: zsync_io_pwrite
+int64_t zsync_io_pwrite(int, const char*, int64_t, int64_t);
+
+// Extern C function: zsync_io_pread_alloc
+const char* zsync_io_pread_alloc(int, int64_t, int64_t);
+
+// Extern C function: zsync_io_last_read_len
+int64_t zsync_io_last_read_len(void);
+
+// Extern C function: zsync_io_ftruncate
+int zsync_io_ftruncate(int, int64_t);
+
+// Extern C function: zsync_io_close
+int zsync_io_close(int);
+
+// Extern C function: zsync_io_fsync
+int zsync_io_fsync(int);
+
+// Extern C function: zsync_buf_alloc
+void* zsync_buf_alloc(int64_t);
+
+// Extern C function: zsync_buf_alloc_str
+const char* zsync_buf_alloc_str(int64_t);
+
+// Extern C function: zsync_buf_get
+int zsync_buf_get(void*, int64_t);
+
+// Extern C function: zsync_buf_set
+void zsync_buf_set(void*, int64_t, int);
+
+// Extern C function: zsync_buf_or
+void zsync_buf_or(void*, int64_t, int);
+
+// Extern C function: zsync_buf_free
+void zsync_buf_free(void*);
+
+// Extern C function: zsync_buf_identity
+const char* zsync_buf_identity(void*);
+
+// Extern C function: malloc (libc-provided, declaration skipped)
+// Extern C function: zsync_buf_identity
+const char* zsync_buf_identity(void*);
+
+// Extern C function: list_new
+void* list_new(void);
+
+// Extern C function: list_add_raw
+int list_add_raw(void*, void*);
+
+// Extern C function: list_add_string_owned
+int list_add_string_owned(void*, void*);
+
+// Extern C function: list_get_raw
+void* list_get_raw(void*, int);
+
+// Extern C function: list_set
+void list_set(void*, int, void*);
+
+// Extern C function: list_size
+int list_size(void*);
+
+// Extern C function: list_remove
+void list_remove(void*, int);
+
+// Extern C function: list_clear
+void list_clear(void*);
+
+// Extern C function: list_free
+void list_free(void*);
+
+// Extern C function: map_new
+void* map_new(void);
+
+// Extern C function: map_put_raw
+int map_put_raw(void*, const char*, void*);
+
+// Extern C function: map_put_string_owned
+int map_put_string_owned(void*, const char*, void*);
+
+// Extern C function: map_get_raw
+void* map_get_raw(void*, const char*);
+
+// Extern C function: map_has
+int map_has(void*, const char*);
+
+// Extern C function: map_remove
+void map_remove(void*, const char*);
+
+// Extern C function: map_size
+int map_size(void*);
+
+// Extern C function: map_clear
+void map_clear(void*);
+
+// Extern C function: map_free
+void map_free(void*);
+
+// Extern C function: map_keys_raw
+void* map_keys_raw(void*);
+
+// Extern C function: map_keys_free
+void map_keys_free(void*);
+
+// Extern C function: malloc (libc-provided, declaration skipped)
+
+// Import: std.string
+// Import: std.cryptography
+// Import: rcksum.rcksum
+// Import: rcksum.checksums
+// Import: rcksum.fileio
+// Import: test.assert
+#line 21 "rcksum/rcksum_test.ae"
+void add_block(void* z, int i, const char* blk) {
+    int _heap_md = 0; (void)_heap_md;
+    const char* md = NULL;
+#line 22 "rcksum/rcksum_test.ae"
+RSum* r = checksums_calc_rsum_block(blk, 8, 0, 8);
+#line 23 "rcksum/rcksum_test.ae"
+{ const char* _tmp_old = md; md = checksums_calc_checksum(blk, 8); if (_heap_md) aether_heap_str_free(_tmp_old); _heap_md = 0; }
+#line 24 "rcksum/rcksum_test.ae"
+rcksum_add_target_block(z, i, checksums_rsum_a(r), checksums_rsum_b(r), md);
+    /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+}
+
+#line 363 "/home/paul/scm/aether/build/../std/string/module.ae"
+static _tuple_string_int string_strip_prefix(const char* s, const char* prefix) {
+if (string_starts_with(s, prefix) != 1) {
+        {
+#line 365 "/home/paul/scm/aether/build/../std/string/module.ae"
+            return (_tuple_string_int){aether_uniform_heap_str((const char*)(s), 0), 0};
+        }
+    }
+#line 367 "/home/paul/scm/aether/build/../std/string/module.ae"
+int prefix_len = string_length(prefix);
+#line 368 "/home/paul/scm/aether/build/../std/string/module.ae"
+int s_len = string_length(s);
+#line 369 "/home/paul/scm/aether/build/../std/string/module.ae"
+    return (_tuple_string_int){aether_uniform_heap_str((const char*)(string_substring(s, prefix_len, s_len)), 1), 1};
+}
+
+#line 143 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+static _tuple_string_string cryptography_base64_encode_padded(const char* data, int length) {
+    int _heap_out = 0; (void)_heap_out;
+    const char* out = NULL;
+#line 144 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+{ const char* _tmp_old = out; out = cryptography_base64_encode_padded_raw(aether_string_data(data), length); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 0; }
+if (out == 0) {
+        {
+#line 146 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+            return (_tuple_string_string){aether_uniform_heap_str((const char*)(""), 0), "openssl unavailable"};
+        }
+    }
+#line 148 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+    return (_tuple_string_string){aether_uniform_heap_str((const char*)(out), _heap_out), ""};
+}
+
+#line 236 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+static _tuple_string_int_string cryptography_md4_bytes(const char* data, int length) {
+    int _heap_raw = 0; (void)_heap_raw;
+    const char* raw = NULL;
+    int _heap_owned = 0; (void)_heap_owned;
+    const char* owned = NULL;
+#line 237 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+int ok = cryptography_md4_bytes_raw(aether_string_data(data), length);
+if (ok == 0) {
+        {
+#line 239 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+            _tuple_string_int_string _builder_ret = (_tuple_string_int_string){aether_uniform_heap_str((const char*)(""), 0), 0, "md4 unavailable"};
+            /* deferred */ if (_heap_raw) { aether_heap_str_free(raw); raw = NULL; _heap_raw = 0; }
+            return _builder_ret;
+        }
+    }
+#line 241 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+{ const char* _tmp_old = raw; raw = cryptography_get_binary_digest(); if (_heap_raw) aether_heap_str_free(_tmp_old); _heap_raw = 0; }
+#line 242 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+int n = cryptography_get_binary_digest_length();
+#line 243 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+{ const char* _tmp_old = owned; owned = string_new_with_length(raw, n); if (_heap_owned) aether_heap_str_free(_tmp_old); _heap_owned = 1; }
+#line 244 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+cryptography_release_binary_digest();
+#line 245 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+    _tuple_string_int_string _builder_ret = (_tuple_string_int_string){aether_uniform_heap_str((const char*)(owned), _heap_owned), n, ""};
+    /* deferred */ if (_heap_raw) { aether_heap_str_free(raw); raw = NULL; _heap_raw = 0; }
+    return _builder_ret;
+    /* deferred */ if (_heap_raw) { aether_heap_str_free(raw); raw = NULL; _heap_raw = 0; }
+}
+
+#line 31 "rcksum/rcksum.ae"
+static int rcksum_NO_BLOCK(void) {
+#line 32 "rcksum/rcksum.ae"
+    return -1;
+}
+
+#line 35 "rcksum/rcksum.ae"
+static int rcksum_BITHASH_BITS(void) {
+#line 36 "rcksum/rcksum.ae"
+    return 3;
+}
+
+#line 85 "rcksum/rcksum.ae"
+static void* rcksum_box_int(int v) {
+#line 86 "rcksum/rcksum.ae"
+void* raw = malloc(8);
+#line 87 "rcksum/rcksum.ae"
+IntCell* p = ((IntCell*)(raw));
+#line 88 "rcksum/rcksum.ae"
+(p->v = v);
+#line 89 "rcksum/rcksum.ae"
+    return p;
+}
+
+#line 92 "rcksum/rcksum.ae"
+static int rcksum_unbox_int(void* p) {
+#line 93 "rcksum/rcksum.ae"
+IntCell* c = ((IntCell*)(p));
+#line 94 "rcksum/rcksum.ae"
+    return c->v;
+}
+
+#line 98 "rcksum/rcksum.ae"
+static HashEntry* rcksum_entry_at(RcksumState* z, int b) {
+#line 99 "rcksum/rcksum.ae"
+    return ((HashEntry*)(list_get_raw(z->block_hashes, b)));
+}
+
+#line 102 "rcksum/rcksum.ae"
+static HashEntry* rcksum_new_entry(void) {
+#line 103 "rcksum/rcksum.ae"
+void* raw = malloc(48);
+#line 104 "rcksum/rcksum.ae"
+HashEntry* e = ((HashEntry*)(raw));
+#line 105 "rcksum/rcksum.ae"
+(e->next = rcksum_NO_BLOCK());
+#line 106 "rcksum/rcksum.ae"
+(e->rsum_a = 0);
+#line 107 "rcksum/rcksum.ae"
+(e->rsum_b = 0);
+#line 108 "rcksum/rcksum.ae"
+(e->md4 = "");
+#line 109 "rcksum/rcksum.ae"
+    return e;
+}
+
+#line 114 "rcksum/rcksum.ae"
+static RcksumState* rcksum_new(int nblocks, int block_size, int rsum_bytes, int checksum_bytes, int seq_matches) {
+#line 115 "rcksum/rcksum.ae"
+void* raw = malloc(160);
+#line 116 "rcksum/rcksum.ae"
+RcksumState* z = ((RcksumState*)(raw));
+#line 117 "rcksum/rcksum.ae"
+(z->blocks = nblocks);
+#line 118 "rcksum/rcksum.ae"
+(z->block_size = block_size);
+#line 119 "rcksum/rcksum.ae"
+(z->checksum_bytes = checksum_bytes);
+#line 120 "rcksum/rcksum.ae"
+(z->seq_matches = seq_matches);
+#line 121 "rcksum/rcksum.ae"
+(z->context = (block_size * seq_matches));
+#line 122 "rcksum/rcksum.ae"
+(z->skip = 0);
+#line 123 "rcksum/rcksum.ae"
+(z->bit_hash = NULL);
+#line 124 "rcksum/rcksum.ae"
+(z->bit_hash_mask = 0);
+#line 125 "rcksum/rcksum.ae"
+(z->bit_hash_len = 0);
+#line 126 "rcksum/rcksum.ae"
+(z->rsum_hash = NULL);
+#line 127 "rcksum/rcksum.ae"
+(z->fd = -1);
+if (rsum_bytes < 3) {
+        {
+#line 130 "rcksum/rcksum.ae"
+(z->rsum_a_mask = 0);
+        }
+    } else {
+if (rsum_bytes == 3) {
+            {
+#line 132 "rcksum/rcksum.ae"
+(z->rsum_a_mask = 0xff);
+            }
+        } else {
+            {
+#line 134 "rcksum/rcksum.ae"
+(z->rsum_a_mask = 0xffff);
+            }
+        }
+    }
+#line 136 "rcksum/rcksum.ae"
+(z->rsum_bits = (rsum_bytes * 8));
+#line 139 "rcksum/rcksum.ae"
+(z->block_shift = checksums_log2(block_size));
+#line 142 "rcksum/rcksum.ae"
+(z->block_hashes = list_new());
+#line 143 "rcksum/rcksum.ae"
+int i = 0;
+while (i < nblocks) {
+        {
+#line 145 "rcksum/rcksum.ae"
+list_add_raw(z->block_hashes, rcksum_new_entry());
+#line 146 "rcksum/rcksum.ae"
+i = (i + 1);
+        }
+    }
+#line 149 "rcksum/rcksum.ae"
+(z->known = ranges_ranges_as_ptr(ranges_new_ranges()));
+#line 151 "rcksum/rcksum.ae"
+(z->r0 = checksums_rsum_as_ptr(checksums_new_rsum(0, 0)));
+#line 152 "rcksum/rcksum.ae"
+(z->r1 = checksums_rsum_as_ptr(checksums_new_rsum(0, 0)));
+#line 154 "rcksum/rcksum.ae"
+void* sraw = malloc(32);
+#line 155 "rcksum/rcksum.ae"
+Stats* st = ((Stats*)(sraw));
+#line 156 "rcksum/rcksum.ae"
+(st->hash_hit = 0);
+#line 157 "rcksum/rcksum.ae"
+(st->weak_hit = 0);
+#line 158 "rcksum/rcksum.ae"
+(st->strong_hit = 0);
+#line 159 "rcksum/rcksum.ae"
+(st->checksummed = 0);
+#line 160 "rcksum/rcksum.ae"
+(z->stats = st);
+#line 162 "rcksum/rcksum.ae"
+    return z;
+}
+
+#line 165 "rcksum/rcksum.ae"
+static void rcksum_set_target_fd(RcksumState* z, int fd) {
+#line 166 "rcksum/rcksum.ae"
+(z->fd = fd);
+}
+
+#line 170 "rcksum/rcksum.ae"
+static void rcksum_add_target_block(RcksumState* z, int b, int rsum_a, int rsum_b, const char* md4) {
+if (b < z->blocks) {
+        {
+#line 172 "rcksum/rcksum.ae"
+HashEntry* e = rcksum_entry_at(z, b);
+#line 173 "rcksum/rcksum.ae"
+(e->md4 = md4);
+#line 174 "rcksum/rcksum.ae"
+(e->rsum_a = (rsum_a & z->rsum_a_mask));
+#line 175 "rcksum/rcksum.ae"
+(e->rsum_b = (rsum_b & 0xffff));
+#line 177 "rcksum/rcksum.ae"
+(z->rsum_hash = NULL);
+#line 178 "rcksum/rcksum.ae"
+(z->bit_hash = NULL);
+        }
+    }
+}
+
+#line 182 "rcksum/rcksum.ae"
+static int rcksum_blocks_todo(RcksumState* z) {
+#line 183 "rcksum/rcksum.ae"
+    return (z->blocks - ranges_got_blocks(z->known));
+}
+
+#line 187 "rcksum/rcksum.ae"
+static int rcksum_calc_rhash(RcksumState* z, int b) {
+#line 188 "rcksum/rcksum.ae"
+HashEntry* e1 = rcksum_entry_at(z, b);
+#line 189 "rcksum/rcksum.ae"
+RSum* rs1 = checksums_new_rsum(e1->rsum_a, e1->rsum_b);
+if (z->seq_matches > 1) {
+        {
+#line 191 "rcksum/rcksum.ae"
+HashEntry* e2 = rcksum_entry_at(z, (b + 1));
+#line 192 "rcksum/rcksum.ae"
+RSum* rs2 = checksums_new_rsum(e2->rsum_a, e2->rsum_b);
+#line 193 "rcksum/rcksum.ae"
+            return checksums_calc_rhash_from_rsums(rs1, rs2, z->seq_matches, z->rsum_a_mask);
+        }
+    }
+#line 195 "rcksum/rcksum.ae"
+    return checksums_calc_rhash_from_rsums(rs1, rs1, z->seq_matches, z->rsum_a_mask);
+}
+
+#line 199 "rcksum/rcksum.ae"
+static const char* rcksum_hkey(int h) {
+#line 200 "rcksum/rcksum.ae"
+    return aether_uniform_heap_str((const char*)(string_from_int((h & 0xffffffff))), 1);
+}
+
+#line 203 "rcksum/rcksum.ae"
+static int rcksum_rsum_hash_get(RcksumState* z, int h) {
+#line 204 "rcksum/rcksum.ae"
+void* v = ({ const char* _ad_0 = (const char*)(rcksum_hkey(h)); void* _ad_r = map_get_raw(z->rsum_hash, aether_string_data(_ad_0)); aether_heap_str_free(_ad_0); _ad_r; });
+if (v == NULL) {
+        {
+#line 206 "rcksum/rcksum.ae"
+            return rcksum_NO_BLOCK();
+        }
+    }
+#line 208 "rcksum/rcksum.ae"
+    return (rcksum_unbox_int(v) - 1);
+}
+
+#line 211 "rcksum/rcksum.ae"
+static void rcksum_rsum_hash_put(RcksumState* z, int h, int id) {
+#line 212 "rcksum/rcksum.ae"
+({ const char* _ad_1 = (const char*)(rcksum_hkey(h)); int _ad_r = map_put_raw(z->rsum_hash, aether_string_data(_ad_1), rcksum_box_int((id + 1))); aether_heap_str_free(_ad_1); _ad_r; });
+}
+
+#line 215 "rcksum/rcksum.ae"
+static void rcksum_rsum_hash_del(RcksumState* z, int h) {
+#line 216 "rcksum/rcksum.ae"
+map_remove(z->rsum_hash, aether_string_data(rcksum_hkey(h)));
+}
+
+#line 220 "rcksum/rcksum.ae"
+static void rcksum_build_hash(RcksumState* z) {
+#line 221 "rcksum/rcksum.ae"
+(z->rsum_hash = map_new());
+#line 223 "rcksum/rcksum.ae"
+int bit_hash_bits = (checksums_log2(z->blocks) + rcksum_BITHASH_BITS());
+#line 224 "rcksum/rcksum.ae"
+(z->bit_hash_mask = ((1 << bit_hash_bits) - 1));
+#line 225 "rcksum/rcksum.ae"
+(z->bit_hash_len = (((z->bit_hash_mask + 1) + 7) >> 3));
+#line 226 "rcksum/rcksum.ae"
+(z->bit_hash = fileio_buf_alloc(z->bit_hash_len));
+#line 229 "rcksum/rcksum.ae"
+int id = (z->blocks - z->seq_matches);
+    int h;
+    int nxt;
+    HashEntry* e;
+    int bit_idx;
+    int bit_pos;
+while (id >= 0) {
+        {
+#line 231 "rcksum/rcksum.ae"
+h = rcksum_calc_rhash(z, id);
+#line 232 "rcksum/rcksum.ae"
+nxt = rcksum_rsum_hash_get(z, h);
+#line 233 "rcksum/rcksum.ae"
+e = rcksum_entry_at(z, id);
+#line 234 "rcksum/rcksum.ae"
+(e->next = nxt);
+#line 235 "rcksum/rcksum.ae"
+rcksum_rsum_hash_put(z, h, id);
+#line 237 "rcksum/rcksum.ae"
+bit_idx = ((h & z->bit_hash_mask) >> 3);
+#line 238 "rcksum/rcksum.ae"
+bit_pos = (h & 7);
+if (bit_idx < z->bit_hash_len) {
+                {
+#line 240 "rcksum/rcksum.ae"
+fileio_buf_or(z->bit_hash, bit_idx, (1 << bit_pos));
+                }
+            }
+#line 242 "rcksum/rcksum.ae"
+id = (id - 1);
+        }
+    }
+}
+
+#line 247 "rcksum/rcksum.ae"
+static void rcksum_remove_block_from_hash(RcksumState* z, int id) {
+if (z->rsum_hash == NULL) {
+        {
+#line 249 "rcksum/rcksum.ae"
+            return;
+        }
+    }
+if (id >= (z->blocks - (z->seq_matches - 1))) {
+        {
+#line 252 "rcksum/rcksum.ae"
+            return;
+        }
+    }
+#line 254 "rcksum/rcksum.ae"
+int h = rcksum_calc_rhash(z, id);
+#line 255 "rcksum/rcksum.ae"
+int p = rcksum_rsum_hash_get(z, h);
+if (p == id) {
+        {
+#line 257 "rcksum/rcksum.ae"
+HashEntry* e = rcksum_entry_at(z, id);
+#line 258 "rcksum/rcksum.ae"
+int nxt = e->next;
+if (nxt != rcksum_NO_BLOCK()) {
+                {
+#line 260 "rcksum/rcksum.ae"
+rcksum_rsum_hash_put(z, h, nxt);
+                }
+            } else {
+                {
+#line 262 "rcksum/rcksum.ae"
+rcksum_rsum_hash_del(z, h);
+                }
+            }
+        }
+    } else {
+if (p != rcksum_NO_BLOCK()) {
+            {
+                HashEntry* pe;
+while (p != rcksum_NO_BLOCK()) {
+                    {
+#line 266 "rcksum/rcksum.ae"
+pe = rcksum_entry_at(z, p);
+if (pe->next == id) {
+                            {
+#line 268 "rcksum/rcksum.ae"
+(pe->next = rcksum_entry_at(z, id)->next);
+#line 269 "rcksum/rcksum.ae"
+p = rcksum_NO_BLOCK();
+                            }
+                        } else {
+                            {
+#line 271 "rcksum/rcksum.ae"
+p = pe->next;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+#line 275 "rcksum/rcksum.ae"
+(rcksum_entry_at(z, id)->next = rcksum_NO_BLOCK());
+}
+
+#line 289 "rcksum/rcksum.ae"
+static int rcksum_prefix_eq(const char* a, int a_len, const char* b, int b_len, int n) {
+#line 290 "rcksum/rcksum.ae"
+int i = 0;
+    int ca;
+    int cb;
+while (i < n) {
+        {
+#line 292 "rcksum/rcksum.ae"
+ca = (string_char_at_n(a, a_len, i) & 0xff);
+#line 293 "rcksum/rcksum.ae"
+cb = (string_char_at_n(b, b_len, i) & 0xff);
+if (ca != cb) {
+                {
+#line 295 "rcksum/rcksum.ae"
+                    return 0;
+                }
+            }
+#line 297 "rcksum/rcksum.ae"
+i = (i + 1);
+        }
+    }
+#line 299 "rcksum/rcksum.ae"
+    return 1;
+}
+
+#line 307 "rcksum/rcksum.ae"
+static int rcksum_write_blocks(RcksumState* z, const char* data, int data_len, int bfrom, int bto, int next) {
+#line 308 "rcksum/rcksum.ae"
+int span = (((bto + 1) - bfrom) << z->block_shift);
+#line 309 "rcksum/rcksum.ae"
+int offset = (bfrom << z->block_shift);
+#line 310 "rcksum/rcksum.ae"
+fileio_write_at(z->fd, data, span, offset);
+#line 312 "rcksum/rcksum.ae"
+int id = bfrom;
+while (id <= bto) {
+        {
+if (id == next) {
+                {
+#line 315 "rcksum/rcksum.ae"
+next = rcksum_entry_at(z, id)->next;
+                }
+            }
+#line 317 "rcksum/rcksum.ae"
+ranges_add_to_ranges(z->known, id);
+if (z->seq_matches == 2) {
+                {
+if (id != bto) {
+                        {
+#line 320 "rcksum/rcksum.ae"
+rcksum_remove_block_from_hash(z, id);
+                        }
+                    } else {
+if (ranges_contains(z->known, (bto + 1)) == 1) {
+                            {
+#line 322 "rcksum/rcksum.ae"
+rcksum_remove_block_from_hash(z, id);
+                            }
+                        }
+                    }
+                }
+            }
+#line 325 "rcksum/rcksum.ae"
+id = (id + 1);
+        }
+    }
+if (z->seq_matches == 2) {
+        {
+if (bfrom > 0) {
+                {
+if (ranges_contains(z->known, (bfrom - 1)) == 1) {
+                        {
+#line 330 "rcksum/rcksum.ae"
+rcksum_remove_block_from_hash(z, (bfrom - 1));
+                        }
+                    }
+                }
+            }
+        }
+    }
+#line 334 "rcksum/rcksum.ae"
+    return next;
+}
+
+#line 340 "rcksum/rcksum.ae"
+static void rcksum_submit_blocks(RcksumState* z, const char* data, int data_len, int bfrom, int bto) {
+    int _heap_block = 0; (void)_heap_block;
+    const char* block = NULL;
+    int _heap_md = 0; (void)_heap_md;
+    const char* md = NULL;
+    int _heap_stored = 0; (void)_heap_stored;
+    const char* stored = NULL;
+    int _heap_prefix = 0; (void)_heap_prefix;
+    const char* prefix = NULL;
+if (z->rsum_hash == NULL) {
+        {
+#line 342 "rcksum/rcksum.ae"
+rcksum_build_hash(z);
+        }
+    }
+#line 344 "rcksum/rcksum.ae"
+int x = bfrom;
+    int off;
+while (x <= bto) {
+        {
+#line 346 "rcksum/rcksum.ae"
+off = ((x - bfrom) << z->block_shift);
+#line 347 "rcksum/rcksum.ae"
+{ const char* _tmp_old = block; block = string_substring(data, off, (off + z->block_size)); if (_heap_block) aether_heap_str_free(_tmp_old); _heap_block = 1; }
+#line 348 "rcksum/rcksum.ae"
+{ const char* _tmp_old = md; md = checksums_calc_checksum(block, z->block_size); if (_heap_md) aether_heap_str_free(_tmp_old); _heap_md = 0; }
+#line 349 "rcksum/rcksum.ae"
+{ const char* _tmp_old = stored; stored = rcksum_entry_at(z, x)->md4; if (_heap_stored) aether_heap_str_free(_tmp_old); _heap_stored = 0; }
+if (rcksum_prefix_eq(md, 16, stored, 16, z->checksum_bytes) == 0) {
+                {
+#line 351 "rcksum/rcksum.ae"
+                    break;
+                }
+            }
+#line 353 "rcksum/rcksum.ae"
+x = (x + 1);
+        }
+    }
+if (x > bfrom) {
+        {
+#line 358 "rcksum/rcksum.ae"
+int span_len = ((x - bfrom) << z->block_shift);
+#line 359 "rcksum/rcksum.ae"
+{ const char* _tmp_old = prefix; prefix = string_substring(data, 0, span_len); if (_heap_prefix) aether_heap_str_free(_tmp_old); _heap_prefix = 1; }
+#line 360 "rcksum/rcksum.ae"
+rcksum_write_blocks(z, prefix, span_len, bfrom, (x - 1), rcksum_NO_BLOCK());
+        }
+    }
+    /* deferred */ if (_heap_prefix) { aether_heap_str_free(prefix); prefix = NULL; _heap_prefix = 0; }
+    /* deferred */ if (_heap_stored) { aether_heap_str_free(stored); stored = NULL; _heap_stored = 0; }
+    /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+    /* deferred */ if (_heap_block) { aether_heap_str_free(block); block = NULL; _heap_block = 0; }
+}
+
+#line 367 "rcksum/rcksum.ae"
+static int rcksum_match_block(RcksumState* z, const char* data, int data_len, int doff) {
+#line 368 "rcksum/rcksum.ae"
+int h = checksums_calc_rhash_from_rsums(z->r0, z->r1, z->seq_matches, z->rsum_a_mask);
+#line 370 "rcksum/rcksum.ae"
+int bit_idx = ((h & z->bit_hash_mask) >> 3);
+#line 371 "rcksum/rcksum.ae"
+int bit_pos = (h & 7);
+if (z->bit_hash == NULL) {
+        {
+#line 373 "rcksum/rcksum.ae"
+            return 0;
+        }
+    }
+if (bit_idx >= z->bit_hash_len) {
+        {
+#line 376 "rcksum/rcksum.ae"
+            return 0;
+        }
+    }
+#line 378 "rcksum/rcksum.ae"
+int bv = fileio_buf_get(z->bit_hash, bit_idx);
+if ((bv & (1 << bit_pos)) == 0) {
+        {
+#line 380 "rcksum/rcksum.ae"
+            return 0;
+        }
+    }
+#line 382 "rcksum/rcksum.ae"
+int e = rcksum_rsum_hash_get(z, h);
+if (e == rcksum_NO_BLOCK()) {
+        {
+#line 384 "rcksum/rcksum.ae"
+            return 0;
+        }
+    }
+#line 386 "rcksum/rcksum.ae"
+    return rcksum_check_chain(z, e, data, data_len, doff);
+}
+
+#line 392 "rcksum/rcksum.ae"
+static int rcksum_check_chain(RcksumState* z, int id, const char* data, int data_len, int doff) {
+    int _heap_md_cache0 = 0; (void)_heap_md_cache0;
+    const char* md_cache0 = NULL;
+    int _heap_md_cache1 = 0; (void)_heap_md_cache1;
+    const char* md_cache1 = NULL;
+    int _heap_block = 0; (void)_heap_block;
+    const char* block = NULL;
+    int _heap_md = 0; (void)_heap_md;
+    const char* md = NULL;
+    int _heap_cand = 0; (void)_heap_cand;
+    const char* cand = NULL;
+    int _heap_stored = 0; (void)_heap_stored;
+    const char* stored = NULL;
+    int _heap_prefix = 0; (void)_heap_prefix;
+    const char* prefix = NULL;
+#line 393 "rcksum/rcksum.ae"
+int got = 0;
+#line 395 "rcksum/rcksum.ae"
+{ const char* _tmp_old = md_cache0; md_cache0 = ""; if (_heap_md_cache0) aether_heap_str_free(_tmp_old); _heap_md_cache0 = 0; }
+#line 396 "rcksum/rcksum.ae"
+{ const char* _tmp_old = md_cache1; md_cache1 = ""; if (_heap_md_cache1) aether_heap_str_free(_tmp_old); _heap_md_cache1 = 0; }
+#line 397 "rcksum/rcksum.ae"
+int cached = 0;
+#line 399 "rcksum/rcksum.ae"
+int next = id;
+    HashEntry* e0;
+    HashEntry* e1;
+    int matching;
+    int checkmd4;
+    int boff;
+    int next_known;
+    int num_write;
+    int span_len;
+while (next != rcksum_NO_BLOCK()) {
+        {
+#line 401 "rcksum/rcksum.ae"
+id = next;
+#line 402 "rcksum/rcksum.ae"
+next = rcksum_entry_at(z, id)->next;
+#line 404 "rcksum/rcksum.ae"
+(z->stats->hash_hit = (z->stats->hash_hit + 1));
+#line 405 "rcksum/rcksum.ae"
+e0 = rcksum_entry_at(z, id);
+if (e0->rsum_a != (checksums_rsum_a(z->r0) & z->rsum_a_mask)) {
+                {
+#line 407 "rcksum/rcksum.ae"
+                    continue;
+                }
+            }
+if (e0->rsum_b != checksums_rsum_b(z->r0)) {
+                {
+#line 410 "rcksum/rcksum.ae"
+                    continue;
+                }
+            }
+if (z->seq_matches > 1) {
+                {
+#line 413 "rcksum/rcksum.ae"
+e1 = rcksum_entry_at(z, (id + 1));
+if (e1->rsum_a != (checksums_rsum_a(z->r1) & z->rsum_a_mask)) {
+                        {
+#line 415 "rcksum/rcksum.ae"
+                            continue;
+                        }
+                    }
+if (e1->rsum_b != checksums_rsum_b(z->r1)) {
+                        {
+#line 418 "rcksum/rcksum.ae"
+                            continue;
+                        }
+                    }
+                }
+            }
+#line 421 "rcksum/rcksum.ae"
+(z->stats->weak_hit = (z->stats->weak_hit + 1));
+#line 424 "rcksum/rcksum.ae"
+matching = 0;
+#line 425 "rcksum/rcksum.ae"
+checkmd4 = 0;
+while (checkmd4 < z->seq_matches) {
+                {
+if (checkmd4 >= cached) {
+                        {
+#line 428 "rcksum/rcksum.ae"
+boff = (doff + (checkmd4 * z->block_size));
+if ((boff + z->block_size) > data_len) {
+                                {
+#line 430 "rcksum/rcksum.ae"
+                                    break;
+                                }
+                            }
+#line 432 "rcksum/rcksum.ae"
+{ const char* _tmp_old = block; block = string_substring(data, boff, (boff + z->block_size)); if (_heap_block) aether_heap_str_free(_tmp_old); _heap_block = 1; }
+#line 433 "rcksum/rcksum.ae"
+{ const char* _tmp_old = md; md = checksums_calc_checksum(block, z->block_size); if (_heap_md) aether_heap_str_free(_tmp_old); _heap_md = 0; }
+if (checkmd4 == 0) {
+                                {
+#line 435 "rcksum/rcksum.ae"
+{ const char* _tmp_old = md_cache0; md_cache0 = aether_uniform_heap_str(md, 0); if (_heap_md_cache0) aether_heap_str_free(_tmp_old); _heap_md_cache0 = 1; }
+                                }
+                            } else {
+                                {
+#line 437 "rcksum/rcksum.ae"
+{ const char* _tmp_old = md_cache1; md_cache1 = aether_uniform_heap_str(md, 0); if (_heap_md_cache1) aether_heap_str_free(_tmp_old); _heap_md_cache1 = 1; }
+                                }
+                            }
+#line 439 "rcksum/rcksum.ae"
+cached = (cached + 1);
+#line 440 "rcksum/rcksum.ae"
+(z->stats->checksummed = (z->stats->checksummed + 1));
+                        }
+                    }
+#line 442 "rcksum/rcksum.ae"
+{ const char* _tmp_old = cand; cand = md_cache0; if (_heap_cand) aether_heap_str_free(_tmp_old); _heap_cand = _heap_md_cache0; _heap_md_cache0 = 0; }
+if (checkmd4 == 1) {
+                        {
+#line 444 "rcksum/rcksum.ae"
+{ const char* _tmp_old = cand; cand = md_cache1; if (_heap_cand) aether_heap_str_free(_tmp_old); _heap_cand = _heap_md_cache1; _heap_md_cache1 = 0; }
+                        }
+                    }
+#line 446 "rcksum/rcksum.ae"
+{ const char* _tmp_old = stored; stored = rcksum_entry_at(z, (id + checkmd4))->md4; if (_heap_stored) aether_heap_str_free(_tmp_old); _heap_stored = 0; }
+if (rcksum_prefix_eq(cand, 16, stored, 16, z->checksum_bytes) == 1) {
+                        {
+#line 448 "rcksum/rcksum.ae"
+matching = (matching + 1);
+                        }
+                    } else {
+                        {
+#line 450 "rcksum/rcksum.ae"
+                            break;
+                        }
+                    }
+#line 452 "rcksum/rcksum.ae"
+checkmd4 = (checkmd4 + 1);
+                }
+            }
+if (matching < z->seq_matches) {
+                {
+#line 456 "rcksum/rcksum.ae"
+                    continue;
+                }
+            }
+#line 459 "rcksum/rcksum.ae"
+(z->stats->strong_hit = (z->stats->strong_hit + matching));
+#line 460 "rcksum/rcksum.ae"
+next_known = ranges_next_contained_after(z->known, id);
+if (next_known == (-(1))) {
+                {
+#line 462 "rcksum/rcksum.ae"
+next_known = z->blocks;
+                }
+            }
+#line 464 "rcksum/rcksum.ae"
+num_write = matching;
+if (next_known < (id + matching)) {
+                {
+#line 466 "rcksum/rcksum.ae"
+num_write = (next_known - id);
+                }
+            }
+#line 469 "rcksum/rcksum.ae"
+span_len = (num_write * z->block_size);
+#line 470 "rcksum/rcksum.ae"
+{ const char* _tmp_old = prefix; prefix = string_substring(data, doff, (doff + span_len)); if (_heap_prefix) aether_heap_str_free(_tmp_old); _heap_prefix = 1; }
+#line 471 "rcksum/rcksum.ae"
+next = rcksum_write_blocks(z, prefix, span_len, id, ((id + num_write) - 1), next);
+#line 472 "rcksum/rcksum.ae"
+got = (got + num_write);
+        }
+    }
+#line 474 "rcksum/rcksum.ae"
+    int _builder_ret = got;
+    /* deferred */ if (_heap_prefix) { aether_heap_str_free(prefix); prefix = NULL; _heap_prefix = 0; }
+    /* deferred */ if (_heap_stored) { aether_heap_str_free(stored); stored = NULL; _heap_stored = 0; }
+    /* deferred */ if (_heap_cand) { aether_heap_str_free(cand); cand = NULL; _heap_cand = 0; }
+    /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+    /* deferred */ if (_heap_block) { aether_heap_str_free(block); block = NULL; _heap_block = 0; }
+    /* deferred */ if (_heap_md_cache1) { aether_heap_str_free(md_cache1); md_cache1 = NULL; _heap_md_cache1 = 0; }
+    /* deferred */ if (_heap_md_cache0) { aether_heap_str_free(md_cache0); md_cache0 = NULL; _heap_md_cache0 = 0; }
+    return _builder_ret;
+    /* deferred */ if (_heap_prefix) { aether_heap_str_free(prefix); prefix = NULL; _heap_prefix = 0; }
+    /* deferred */ if (_heap_stored) { aether_heap_str_free(stored); stored = NULL; _heap_stored = 0; }
+    /* deferred */ if (_heap_cand) { aether_heap_str_free(cand); cand = NULL; _heap_cand = 0; }
+    /* deferred */ if (_heap_md) { aether_heap_str_free(md); md = NULL; _heap_md = 0; }
+    /* deferred */ if (_heap_block) { aether_heap_str_free(block); block = NULL; _heap_block = 0; }
+    /* deferred */ if (_heap_md_cache1) { aether_heap_str_free(md_cache1); md_cache1 = NULL; _heap_md_cache1 = 0; }
+    /* deferred */ if (_heap_md_cache0) { aether_heap_str_free(md_cache0); md_cache0 = NULL; _heap_md_cache0 = 0; }
+}
+
+#line 480 "rcksum/rcksum.ae"
+static int rcksum_submit_source_data(RcksumState* z, const char* data, int data_len, int offset) {
+#line 481 "rcksum/rcksum.ae"
+int x = 0;
+#line 482 "rcksum/rcksum.ae"
+int got = 0;
+#line 483 "rcksum/rcksum.ae"
+int x_limit = (data_len - z->context);
+if (offset != 0) {
+        {
+#line 486 "rcksum/rcksum.ae"
+x = z->skip;
+        }
+    }
+#line 488 "rcksum/rcksum.ae"
+(z->skip = 0);
+if (x != 0) {
+        {
+#line 491 "rcksum/rcksum.ae"
+(z->r0 = checksums_rsum_as_ptr(checksums_calc_rsum_block(data, data_len, x, z->block_size)));
+if (z->seq_matches > 1) {
+                {
+#line 493 "rcksum/rcksum.ae"
+(z->r1 = checksums_rsum_as_ptr(checksums_calc_rsum_block(data, data_len, (x + z->block_size), z->block_size)));
+                }
+            }
+        }
+    } else {
+if (offset == 0) {
+            {
+#line 496 "rcksum/rcksum.ae"
+(z->r0 = checksums_rsum_as_ptr(checksums_calc_rsum_block(data, data_len, x, z->block_size)));
+if (z->seq_matches > 1) {
+                    {
+#line 498 "rcksum/rcksum.ae"
+(z->r1 = checksums_rsum_as_ptr(checksums_calc_rsum_block(data, data_len, (x + z->block_size), z->block_size)));
+                    }
+                }
+            }
+        }
+    }
+    int blocks_matched;
+    int thismatch;
+    int old_c;
+    int new_c;
+    int old1;
+    int new1;
+while (x < x_limit) {
+        {
+#line 503 "rcksum/rcksum.ae"
+blocks_matched = 0;
+while (blocks_matched == 0) {
+                {
+if (x >= x_limit) {
+                        {
+#line 506 "rcksum/rcksum.ae"
+                            break;
+                        }
+                    }
+#line 508 "rcksum/rcksum.ae"
+thismatch = rcksum_match_block(z, data, data_len, x);
+if (thismatch > 0) {
+                        {
+#line 510 "rcksum/rcksum.ae"
+blocks_matched = z->seq_matches;
+#line 511 "rcksum/rcksum.ae"
+got = (got + thismatch);
+                        }
+                    }
+if (blocks_matched == 0) {
+                        {
+if ((x + (z->block_size * z->seq_matches)) < data_len) {
+                                {
+#line 515 "rcksum/rcksum.ae"
+old_c = (string_char_at_n(data, data_len, x) & 0xff);
+#line 516 "rcksum/rcksum.ae"
+new_c = (string_char_at_n(data, data_len, (x + z->block_size)) & 0xff);
+#line 517 "rcksum/rcksum.ae"
+checksums_update_rsum(z->r0, old_c, new_c, z->block_shift);
+if (z->seq_matches > 1) {
+                                        {
+#line 519 "rcksum/rcksum.ae"
+old1 = (string_char_at_n(data, data_len, (x + z->block_size)) & 0xff);
+#line 520 "rcksum/rcksum.ae"
+new1 = (string_char_at_n(data, data_len, (x + (2 * z->block_size))) & 0xff);
+#line 521 "rcksum/rcksum.ae"
+checksums_update_rsum(z->r1, old1, new1, z->block_shift);
+                                        }
+                                    }
+                                }
+                            }
+#line 524 "rcksum/rcksum.ae"
+x = (x + 1);
+                        }
+                    }
+                }
+            }
+if (blocks_matched > 0) {
+                {
+#line 529 "rcksum/rcksum.ae"
+x = (x + (z->block_size * blocks_matched));
+if (x <= x_limit) {
+                        {
+if (z->seq_matches > 1) {
+                                {
+if (blocks_matched == 1) {
+                                        {
+#line 533 "rcksum/rcksum.ae"
+(z->r0 = z->r1);
+                                        }
+                                    } else {
+if ((x + z->block_size) <= data_len) {
+                                            {
+#line 535 "rcksum/rcksum.ae"
+(z->r0 = checksums_rsum_as_ptr(checksums_calc_rsum_block(data, data_len, x, z->block_size)));
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+if ((x + z->block_size) <= data_len) {
+                                    {
+#line 538 "rcksum/rcksum.ae"
+(z->r0 = checksums_rsum_as_ptr(checksums_calc_rsum_block(data, data_len, x, z->block_size)));
+                                    }
+                                }
+                            }
+if (z->seq_matches > 1) {
+                                {
+if ((x + (2 * z->block_size)) <= data_len) {
+                                        {
+#line 542 "rcksum/rcksum.ae"
+(z->r1 = checksums_rsum_as_ptr(checksums_calc_rsum_block(data, data_len, (x + z->block_size), z->block_size)));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+#line 549 "rcksum/rcksum.ae"
+(z->skip = (x - x_limit));
+#line 550 "rcksum/rcksum.ae"
+    return got;
+}
+
+#line 560 "rcksum/rcksum.ae"
+static int rcksum_submit_source_buffer(RcksumState* z, const char* data, int data_len) {
+    int _heap_padded = 0; (void)_heap_padded;
+    const char* padded = NULL;
+    int _heap_zeros = 0; (void)_heap_zeros;
+    const char* zeros = NULL;
+if (z->rsum_hash == NULL) {
+        {
+#line 562 "rcksum/rcksum.ae"
+rcksum_build_hash(z);
+        }
+    }
+#line 564 "rcksum/rcksum.ae"
+int buf_size = (z->block_size * 16);
+#line 568 "rcksum/rcksum.ae"
+int eff = data_len;
+if (data_len < buf_size) {
+        {
+#line 570 "rcksum/rcksum.ae"
+eff = (data_len + z->context);
+if (eff > buf_size) {
+                {
+#line 572 "rcksum/rcksum.ae"
+eff = buf_size;
+                }
+            }
+        }
+    }
+#line 576 "rcksum/rcksum.ae"
+{ const char* _tmp_old = padded; padded = data; if (_heap_padded) aether_heap_str_free(_tmp_old); _heap_padded = 0; }
+if (eff > data_len) {
+        {
+#line 578 "rcksum/rcksum.ae"
+{ const char* _tmp_old = zeros; zeros = rcksum_make_zeros((eff - data_len)); if (_heap_zeros) aether_heap_str_free(_tmp_old); _heap_zeros = 1; }
+#line 579 "rcksum/rcksum.ae"
+{ const char* _tmp_old = padded; padded = rcksum_append_bytes(data, data_len, zeros, (eff - data_len)); if (_heap_padded) aether_heap_str_free(_tmp_old); _heap_padded = 1; }
+        }
+    }
+#line 581 "rcksum/rcksum.ae"
+    int _builder_ret = rcksum_submit_source_data(z, padded, eff, 0);
+    /* deferred */ if (_heap_zeros) { aether_heap_str_free(zeros); zeros = NULL; _heap_zeros = 0; }
+    /* deferred */ if (_heap_padded) { aether_heap_str_free(padded); padded = NULL; _heap_padded = 0; }
+    return _builder_ret;
+    /* deferred */ if (_heap_zeros) { aether_heap_str_free(zeros); zeros = NULL; _heap_zeros = 0; }
+    /* deferred */ if (_heap_padded) { aether_heap_str_free(padded); padded = NULL; _heap_padded = 0; }
+}
+
+#line 585 "rcksum/rcksum.ae"
+static const char* rcksum_make_zeros(int n) {
+#line 586 "rcksum/rcksum.ae"
+    return aether_uniform_heap_str((const char*)(fileio_buf_alloc_str(n)), 1);
+}
+
+#line 591 "rcksum/rcksum.ae"
+static const char* rcksum_append_bytes(const char* a, int a_len, const char* b, int b_len) {
+#line 592 "rcksum/rcksum.ae"
+int total = (a_len + b_len);
+#line 593 "rcksum/rcksum.ae"
+void* out = fileio_buf_alloc(total);
+#line 594 "rcksum/rcksum.ae"
+int i = 0;
+while (i < a_len) {
+        {
+#line 596 "rcksum/rcksum.ae"
+fileio_buf_set(out, i, (string_char_at_n(a, a_len, i) & 0xff));
+#line 597 "rcksum/rcksum.ae"
+i = (i + 1);
+        }
+    }
+#line 599 "rcksum/rcksum.ae"
+int j = 0;
+while (j < b_len) {
+        {
+#line 601 "rcksum/rcksum.ae"
+fileio_buf_set(out, (a_len + j), (string_char_at_n(b, b_len, j) & 0xff));
+#line 602 "rcksum/rcksum.ae"
+j = (j + 1);
+        }
+    }
+#line 604 "rcksum/rcksum.ae"
+    return aether_uniform_heap_str((const char*)(fileio_buf_to_str(out, total)), 1);
+}
+
+#line 608 "rcksum/rcksum.ae"
+static _tuple_string_int rcksum_read_known_data(RcksumState* z, int len, int offset) {
+if (z->fd < 0) {
+        {
+#line 610 "rcksum/rcksum.ae"
+            return (_tuple_string_int){aether_uniform_heap_str((const char*)(""), 0), 0};
+        }
+    }
+#line 612 "rcksum/rcksum.ae"
+    return fileio_read_at(z->fd, len, offset);
+}
+
+#line 32 "rcksum/checksums.ae"
+static RSum* checksums_new_rsum(int a, int b) {
+#line 33 "rcksum/checksums.ae"
+void* raw = malloc(16);
+#line 34 "rcksum/checksums.ae"
+RSum* r = ((RSum*)(raw));
+#line 35 "rcksum/checksums.ae"
+(r->a = (a & 0xffff));
+#line 36 "rcksum/checksums.ae"
+(r->b = (b & 0xffff));
+#line 37 "rcksum/checksums.ae"
+    return r;
+}
+
+#line 42 "rcksum/checksums.ae"
+static void* checksums_rsum_as_ptr(RSum* r) {
+#line 43 "rcksum/checksums.ae"
+    return r;
+}
+
+#line 46 "rcksum/checksums.ae"
+static int checksums_rsum_a(RSum* r) {
+#line 47 "rcksum/checksums.ae"
+    return r->a;
+}
+
+#line 50 "rcksum/checksums.ae"
+static int checksums_rsum_b(RSum* r) {
+#line 51 "rcksum/checksums.ae"
+    return r->b;
+}
+
+#line 58 "rcksum/checksums.ae"
+static RSum* checksums_calc_rsum_block(const char* data, int data_len, int off, int len) {
+#line 59 "rcksum/checksums.ae"
+int a = 0;
+#line 60 "rcksum/checksums.ae"
+int b = 0;
+#line 61 "rcksum/checksums.ae"
+int i = 0;
+    int c;
+while (i < len) {
+        {
+#line 63 "rcksum/checksums.ae"
+c = checksums_byte_at(data, data_len, (off + i));
+#line 64 "rcksum/checksums.ae"
+a = ((a + c) & 0xffff);
+#line 65 "rcksum/checksums.ae"
+b = ((b + a) & 0xffff);
+#line 66 "rcksum/checksums.ae"
+i = (i + 1);
+        }
+    }
+#line 68 "rcksum/checksums.ae"
+    return checksums_new_rsum(a, b);
+}
+
+#line 75 "rcksum/checksums.ae"
+static void checksums_update_rsum(RSum* r, int old_c, int new_c, int block_shift) {
+#line 76 "rcksum/checksums.ae"
+(r->a = (((r->a + new_c) - old_c) & 0xffff));
+#line 77 "rcksum/checksums.ae"
+(r->b = (((r->b + r->a) - ((old_c << block_shift) & 0xffff)) & 0xffff));
+}
+
+#line 83 "rcksum/checksums.ae"
+static const char* checksums_calc_checksum(const char* data, int len) {
+    int _heap_digest = 0; (void)_heap_digest;
+    const char* digest = NULL;
+    int _heap_err = 0; (void)_heap_err;
+    const char* err = NULL;
+#line 84 "rcksum/checksums.ae"
+    _tuple_string_int_string _tup0 = cryptography_md4_bytes(data, len);
+    { const char* _tmp_old = digest; digest = _tup0._0; if (_heap_digest) aether_heap_str_free(_tmp_old); _heap_digest = 1; }
+    int n = _tup0._1;
+    { const char* _tmp_old = err; err = _tup0._2; if (_heap_err) aether_heap_str_free(_tmp_old); _heap_err = 0; }
+if (strcmp(_aether_safe_str(err), _aether_safe_str("")) != 0) {
+        {
+#line 86 "rcksum/checksums.ae"
+            const char* _builder_ret = "";
+            if (_heap_digest) { aether_heap_str_free(digest); digest = NULL; _heap_digest = 0; }
+            /* deferred */ if (_heap_err) { aether_heap_str_free(err); err = NULL; _heap_err = 0; }
+            return _builder_ret;
+        }
+    }
+#line 88 "rcksum/checksums.ae"
+    const char* _builder_ret = digest;
+    /* deferred */ if (_heap_err) { aether_heap_str_free(err); err = NULL; _heap_err = 0; }
+    return _builder_ret;
+    /* deferred */ if (_heap_err) { aether_heap_str_free(err); err = NULL; _heap_err = 0; }
+}
+
+#line 95 "rcksum/checksums.ae"
+static int checksums_byte_at(const char* data, int data_len, int i) {
+#line 96 "rcksum/checksums.ae"
+    return (string_char_at_n(data, data_len, i) & 0xff);
+}
+
+#line 104 "rcksum/checksums.ae"
+static int checksums_calc_rhash_from_rsums(RSum* rs1, RSum* rs2, int seq_matches, int rsum_a_mask) {
+#line 105 "rcksum/checksums.ae"
+int hash = rs1->b;
+if (seq_matches > 1) {
+        {
+#line 107 "rcksum/checksums.ae"
+hash = (hash ^ ((rs2->b << 16) & 0xffffffff));
+        }
+    } else {
+        {
+#line 109 "rcksum/checksums.ae"
+hash = (hash ^ (((rs1->a & rsum_a_mask) << 16) & 0xffffffff));
+        }
+    }
+#line 111 "rcksum/checksums.ae"
+    return (hash & 0xffffffff);
+}
+
+#line 116 "rcksum/checksums.ae"
+static int checksums_log2(int x) {
+if (x == 0) {
+        {
+#line 118 "rcksum/checksums.ae"
+            return 0;
+        }
+    }
+#line 120 "rcksum/checksums.ae"
+int n = 0;
+#line 121 "rcksum/checksums.ae"
+int64_t v = (x & 0xffffffff);
+while (v > 1) {
+        {
+#line 123 "rcksum/checksums.ae"
+v = (v >> 1);
+#line 124 "rcksum/checksums.ae"
+n = (n + 1);
+        }
+    }
+#line 126 "rcksum/checksums.ae"
+    return n;
+}
+
+#line 23 "rcksum/fileio.ae"
+static int fileio_open_rw(const char* path) {
+#line 24 "rcksum/fileio.ae"
+    return zsync_io_open_rw_trunc(aether_string_data(path));
+}
+
+#line 36 "rcksum/fileio.ae"
+static int fileio_write_at(int fd, const char* data, int len, int offset) {
+#line 37 "rcksum/fileio.ae"
+int64_t written = zsync_io_pwrite(fd, aether_string_data(data), len, offset);
+#line 38 "rcksum/fileio.ae"
+    return written;
+}
+
+#line 44 "rcksum/fileio.ae"
+static _tuple_string_int fileio_read_at(int fd, int len, int offset) {
+    int _heap_buf = 0; (void)_heap_buf;
+    const char* buf = NULL;
+    int _heap_s = 0; (void)_heap_s;
+    const char* s = NULL;
+#line 45 "rcksum/fileio.ae"
+{ const char* _tmp_old = buf; buf = zsync_io_pread_alloc(fd, len, offset); if (_heap_buf) aether_heap_str_free(_tmp_old); _heap_buf = 0; }
+#line 46 "rcksum/fileio.ae"
+int64_t n = zsync_io_last_read_len();
+if (n < 0) {
+        {
+#line 48 "rcksum/fileio.ae"
+            _tuple_string_int _builder_ret = (_tuple_string_int){aether_uniform_heap_str((const char*)(""), 0), (-(1))};
+            /* deferred */ if (_heap_buf) { aether_heap_str_free(buf); buf = NULL; _heap_buf = 0; }
+            return _builder_ret;
+        }
+    }
+#line 52 "rcksum/fileio.ae"
+{ const char* _tmp_old = s; s = string_new_with_length(buf, n); if (_heap_s) aether_heap_str_free(_tmp_old); _heap_s = 1; }
+#line 53 "rcksum/fileio.ae"
+    _tuple_string_int _builder_ret = (_tuple_string_int){aether_uniform_heap_str((const char*)(s), _heap_s), n};
+    /* deferred */ if (_heap_buf) { aether_heap_str_free(buf); buf = NULL; _heap_buf = 0; }
+    return _builder_ret;
+    /* deferred */ if (_heap_buf) { aether_heap_str_free(buf); buf = NULL; _heap_buf = 0; }
+}
+
+#line 60 "rcksum/fileio.ae"
+static int fileio_close_fd(int fd) {
+#line 61 "rcksum/fileio.ae"
+    return zsync_io_close(fd);
+}
+
+#line 64 "rcksum/fileio.ae"
+static int fileio_sync_fd(int fd) {
+#line 65 "rcksum/fileio.ae"
+    return zsync_io_fsync(fd);
+}
+
+#line 79 "rcksum/fileio.ae"
+static void* fileio_buf_alloc(int n) {
+#line 80 "rcksum/fileio.ae"
+    return zsync_buf_alloc(n);
+}
+
+#line 85 "rcksum/fileio.ae"
+static const char* fileio_buf_alloc_str(int n) {
+#line 86 "rcksum/fileio.ae"
+    return aether_uniform_heap_str((const char*)(string_new_with_length(zsync_buf_alloc_str(n), n)), 1);
+}
+
+#line 89 "rcksum/fileio.ae"
+static int fileio_buf_get(void* b, int i) {
+#line 90 "rcksum/fileio.ae"
+    return zsync_buf_get(b, i);
+}
+
+#line 93 "rcksum/fileio.ae"
+static void fileio_buf_set(void* b, int i, int v) {
+#line 94 "rcksum/fileio.ae"
+zsync_buf_set(b, i, v);
+}
+
+#line 97 "rcksum/fileio.ae"
+static void fileio_buf_or(void* b, int i, int v) {
+#line 98 "rcksum/fileio.ae"
+zsync_buf_or(b, i, v);
+}
+
+#line 108 "rcksum/fileio.ae"
+static const char* fileio_buf_to_str(void* b, int n) {
+#line 109 "rcksum/fileio.ae"
+    return aether_uniform_heap_str((const char*)(string_new_with_length(zsync_buf_identity(b), n)), 1);
+}
+
+#line 25 "test/assert.ae"
+static Harness* assert_new(void) {
+#line 26 "test/assert.ae"
+void* raw = malloc(16);
+#line 27 "test/assert.ae"
+Harness* h = ((Harness*)(raw));
+#line 28 "test/assert.ae"
+(h->passed = 0);
+#line 29 "test/assert.ae"
+(h->failed = 0);
+#line 30 "test/assert.ae"
+    return h;
+}
+
+#line 33 "test/assert.ae"
+static void assert_ok(Harness* h, int cond, const char* name) {
+if (cond != 0) {
+        {
+#line 35 "test/assert.ae"
+(h->passed = (h->passed + 1));
+#line 36 "test/assert.ae"
+printf("  ok   %s", _aether_safe_str(name)); putchar('\n');
+        }
+    } else {
+        {
+#line 38 "test/assert.ae"
+(h->failed = (h->failed + 1));
+#line 39 "test/assert.ae"
+printf("  FAIL %s", _aether_safe_str(name)); putchar('\n');
+        }
+    }
+}
+
+#line 43 "test/assert.ae"
+static void assert_eq_int(Harness* h, int got, int want, const char* name) {
+if (got == want) {
+        {
+#line 45 "test/assert.ae"
+(h->passed = (h->passed + 1));
+#line 46 "test/assert.ae"
+printf("  ok   %s", _aether_safe_str(name)); putchar('\n');
+        }
+    } else {
+        {
+#line 48 "test/assert.ae"
+(h->failed = (h->failed + 1));
+#line 49 "test/assert.ae"
+printf("  FAIL %s: got %d, want %d", _aether_safe_str(name), got, want); putchar('\n');
+        }
+    }
+}
+
+#line 53 "test/assert.ae"
+static void assert_eq_str(Harness* h, const char* got, const char* want, const char* name) {
+if (string_equals(got, want) == 1) {
+        {
+#line 55 "test/assert.ae"
+(h->passed = (h->passed + 1));
+#line 56 "test/assert.ae"
+printf("  ok   %s", _aether_safe_str(name)); putchar('\n');
+        }
+    } else {
+        {
+#line 58 "test/assert.ae"
+(h->failed = (h->failed + 1));
+#line 59 "test/assert.ae"
+printf("  FAIL %s: got '%s', want '%s'", _aether_safe_str(name), _aether_safe_str(got), _aether_safe_str(want)); putchar('\n');
+        }
+    }
+}
+
+#line 64 "test/assert.ae"
+static void assert_report(Harness* h) {
+#line 65 "test/assert.ae"
+int total = (h->passed + h->failed);
+#line 66 "test/assert.ae"
+puts("");
+#line 67 "test/assert.ae"
+printf("%d/%d passed, %d failed", h->passed, total, h->failed); putchar('\n');
+if (h->failed != 0) {
+        {
+#line 69 "test/assert.ae"
+exit(1);
+        }
+    }
+}
+
+// Import: std.list
+// Import: std.map
+// Import: rcksum.ranges
+#line 27 "rcksum/ranges.ae"
+static BlockPair* ranges_new_pair(int start, int fin) {
+#line 28 "rcksum/ranges.ae"
+void* raw = malloc(16);
+#line 29 "rcksum/ranges.ae"
+BlockPair* p = ((BlockPair*)(raw));
+#line 30 "rcksum/ranges.ae"
+(p->start = start);
+#line 31 "rcksum/ranges.ae"
+(p->fin = fin);
+#line 32 "rcksum/ranges.ae"
+    return p;
+}
+
+#line 38 "rcksum/ranges.ae"
+static int ranges_pair_start(BlockPair* p) {
+#line 39 "rcksum/ranges.ae"
+    return p->start;
+}
+
+#line 42 "rcksum/ranges.ae"
+static int ranges_pair_fin(BlockPair* p) {
+#line 43 "rcksum/ranges.ae"
+    return p->fin;
+}
+
+#line 46 "rcksum/ranges.ae"
+static BlockRanges* ranges_new_ranges(void) {
+#line 47 "rcksum/ranges.ae"
+void* raw = malloc(16);
+#line 48 "rcksum/ranges.ae"
+BlockRanges* z = ((BlockRanges*)(raw));
+#line 49 "rcksum/ranges.ae"
+(z->ranges = list_new());
+#line 50 "rcksum/ranges.ae"
+(z->got_blocks = 0);
+#line 51 "rcksum/ranges.ae"
+    return z;
+}
+
+#line 55 "rcksum/ranges.ae"
+static void* ranges_ranges_as_ptr(BlockRanges* z) {
+#line 56 "rcksum/ranges.ae"
+    return z;
+}
+
+#line 64 "rcksum/ranges.ae"
+static int ranges_got_blocks(BlockRanges* z) {
+#line 65 "rcksum/ranges.ae"
+    return z->got_blocks;
+}
+
+#line 74 "rcksum/ranges.ae"
+static int ranges_range_start_at(BlockRanges* z, int i) {
+#line 75 "rcksum/ranges.ae"
+    return ranges_pair_start(ranges_pair_at(z, i));
+}
+
+#line 78 "rcksum/ranges.ae"
+static int ranges_range_fin_at(BlockRanges* z, int i) {
+#line 79 "rcksum/ranges.ae"
+    return ranges_pair_fin(ranges_pair_at(z, i));
+}
+
+#line 82 "rcksum/ranges.ae"
+static BlockPair* ranges_pair_at(BlockRanges* z, int i) {
+#line 83 "rcksum/ranges.ae"
+    return ((BlockPair*)(list_get_raw(z->ranges, i)));
+}
+
+#line 89 "rcksum/ranges.ae"
+static void ranges_insert_pair(BlockRanges* z, int at, BlockPair* p) {
+#line 90 "rcksum/ranges.ae"
+int n = list_size(z->ranges);
+if (at >= n) {
+        {
+#line 92 "rcksum/ranges.ae"
+list_add_raw(z->ranges, p);
+#line 93 "rcksum/ranges.ae"
+            return;
+        }
+    }
+#line 96 "rcksum/ranges.ae"
+void* last = list_get_raw(z->ranges, (n - 1));
+#line 97 "rcksum/ranges.ae"
+list_add_raw(z->ranges, last);
+#line 99 "rcksum/ranges.ae"
+int i = (n - 1);
+    void* prev;
+while (i > at) {
+        {
+#line 101 "rcksum/ranges.ae"
+prev = list_get_raw(z->ranges, (i - 1));
+#line 102 "rcksum/ranges.ae"
+list_set(z->ranges, i, prev);
+#line 103 "rcksum/ranges.ae"
+i = (i - 1);
+        }
+    }
+#line 105 "rcksum/ranges.ae"
+list_set(z->ranges, at, p);
+}
+
+#line 113 "rcksum/ranges.ae"
+static int ranges_range_before_block(BlockRanges* z, int x) {
+#line 114 "rcksum/ranges.ae"
+int lo = 0;
+#line 115 "rcksum/ranges.ae"
+int hi = (list_size(z->ranges) - 1);
+    int r;
+    BlockPair* p;
+while (lo <= hi) {
+        {
+#line 117 "rcksum/ranges.ae"
+r = ((hi + lo) / 2);
+#line 118 "rcksum/ranges.ae"
+p = ranges_pair_at(z, r);
+if (x > p->fin) {
+                {
+#line 120 "rcksum/ranges.ae"
+lo = (r + 1);
+                }
+            } else {
+if (x < p->start) {
+                    {
+#line 122 "rcksum/ranges.ae"
+hi = (r - 1);
+                    }
+                } else {
+                    {
+#line 124 "rcksum/ranges.ae"
+                        return (-(1));
+                    }
+                }
+            }
+        }
+    }
+#line 127 "rcksum/ranges.ae"
+    return lo;
+}
+
+#line 131 "rcksum/ranges.ae"
+static void ranges_add_to_ranges(BlockRanges* z, int x) {
+#line 132 "rcksum/ranges.ae"
+int r = ranges_range_before_block(z, x);
+if (r == (-(1))) {
+        {
+#line 134 "rcksum/ranges.ae"
+            return;
+        }
+    }
+#line 136 "rcksum/ranges.ae"
+(z->got_blocks = (z->got_blocks + 1));
+#line 137 "rcksum/ranges.ae"
+int n = list_size(z->ranges);
+if (r > 0) {
+        {
+if (r < n) {
+                {
+#line 142 "rcksum/ranges.ae"
+BlockPair* below = ranges_pair_at(z, (r - 1));
+#line 143 "rcksum/ranges.ae"
+BlockPair* above = ranges_pair_at(z, r);
+if (below->fin == (x - 1)) {
+                        {
+if (above->start == (x + 1)) {
+                                {
+#line 146 "rcksum/ranges.ae"
+(below->fin = above->fin);
+#line 147 "rcksum/ranges.ae"
+list_remove(z->ranges, r);
+#line 148 "rcksum/ranges.ae"
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+if (r > 0) {
+        {
+if (n > 0) {
+                {
+#line 157 "rcksum/ranges.ae"
+BlockPair* below = ranges_pair_at(z, (r - 1));
+if (below->fin == (x - 1)) {
+                        {
+#line 159 "rcksum/ranges.ae"
+(below->fin = x);
+#line 160 "rcksum/ranges.ae"
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+if (r < n) {
+        {
+#line 167 "rcksum/ranges.ae"
+BlockPair* above = ranges_pair_at(z, r);
+if (above->start == (x + 1)) {
+                {
+#line 169 "rcksum/ranges.ae"
+(above->start = x);
+#line 170 "rcksum/ranges.ae"
+                    return;
+                }
+            }
+        }
+    }
+#line 175 "rcksum/ranges.ae"
+ranges_insert_pair(z, r, ranges_new_pair(x, x));
+}
+
+#line 179 "rcksum/ranges.ae"
+static int ranges_contains(BlockRanges* z, int x) {
+if (ranges_range_before_block(z, x) == (-(1))) {
+        {
+#line 181 "rcksum/ranges.ae"
+            return 1;
+        }
+    }
+#line 183 "rcksum/ranges.ae"
+    return 0;
+}
+
+#line 188 "rcksum/ranges.ae"
+static int ranges_next_contained_after(BlockRanges* z, int x) {
+#line 189 "rcksum/ranges.ae"
+int r = ranges_range_before_block(z, x);
+#line 190 "rcksum/ranges.ae"
+int n = list_size(z->ranges);
+if (r == (-(1))) {
+        {
+#line 193 "rcksum/ranges.ae"
+int i = 0;
+            BlockPair* p;
+while (i < n) {
+                {
+#line 195 "rcksum/ranges.ae"
+p = ranges_pair_at(z, i);
+if (x >= p->start) {
+                        {
+if (x <= p->fin) {
+                                {
+#line 198 "rcksum/ranges.ae"
+                                    return (p->fin + 1);
+                                }
+                            }
+                        }
+                    }
+#line 201 "rcksum/ranges.ae"
+i = (i + 1);
+                }
+            }
+        }
+    }
+if (r >= n) {
+        {
+#line 205 "rcksum/ranges.ae"
+            return (-(1));
+        }
+    }
+#line 207 "rcksum/ranges.ae"
+    return ranges_pair_at(z, r)->start;
+}
+
+#line 211 "rcksum/ranges.ae"
+static int ranges_list_len(void* l) {
+#line 212 "rcksum/ranges.ae"
+    return list_size(l);
+}
+
+int main(int argc, char** argv) {
+    #ifdef _WIN32
+    SetConsoleOutputCP(65001);  // CP_UTF8
+    SetConsoleCP(65001);
+    _setmode(_fileno(stdout), _O_BINARY);
+    _setmode(_fileno(stderr), _O_BINARY);
+    #endif
+    aether_args_init(argc, argv);
+    
+    int _heap_a = 0; (void)_heap_a;
+    const char* a = NULL;
+    int _heap_b = 0; (void)_heap_b;
+    const char* b = NULL;
+    int _heap_c = 0; (void)_heap_c;
+    const char* c = NULL;
+    int _heap_d = 0; (void)_heap_d;
+    const char* d = NULL;
+    int _heap_seed = 0; (void)_heap_seed;
+    const char* seed = NULL;
+    int _heap_result = 0; (void)_heap_result;
+    const char* result = NULL;
+    {
+#line 28 "rcksum/rcksum_test.ae"
+puts("=== rcksum end-to-end (parity vs Go TestE2E) ===");
+#line 29 "rcksum/rcksum_test.ae"
+Harness* h = assert_new();
+#line 31 "rcksum/rcksum_test.ae"
+int bs = 8;
+#line 32 "rcksum/rcksum_test.ae"
+int nb = 4;
+#line 33 "rcksum/rcksum_test.ae"
+{ const char* _tmp_old = a; a = "AAAAAAAA"; if (_heap_a) aether_heap_str_free(_tmp_old); _heap_a = 0; }
+#line 34 "rcksum/rcksum_test.ae"
+{ const char* _tmp_old = b; b = "BBBBBBBB"; if (_heap_b) aether_heap_str_free(_tmp_old); _heap_b = 0; }
+#line 35 "rcksum/rcksum_test.ae"
+{ const char* _tmp_old = c; c = "CCCCCCCC"; if (_heap_c) aether_heap_str_free(_tmp_old); _heap_c = 0; }
+#line 36 "rcksum/rcksum_test.ae"
+{ const char* _tmp_old = d; d = "DDDDDDDD"; if (_heap_d) aether_heap_str_free(_tmp_old); _heap_d = 0; }
+#line 38 "rcksum/rcksum_test.ae"
+RcksumState* z = rcksum_new(nb, bs, 4, 16, 1);
+#line 39 "rcksum/rcksum_test.ae"
+add_block(z, 0, a);
+#line 40 "rcksum/rcksum_test.ae"
+add_block(z, 1, b);
+#line 41 "rcksum/rcksum_test.ae"
+add_block(z, 2, c);
+#line 42 "rcksum/rcksum_test.ae"
+add_block(z, 3, d);
+#line 44 "rcksum/rcksum_test.ae"
+assert_eq_int(h, rcksum_blocks_todo(z), 4, "todo=4 before any data");
+#line 47 "rcksum/rcksum_test.ae"
+int fd = fileio_open_rw("/tmp/zsync_rcksum_e2e.bin");
+#line 48 "rcksum/rcksum_test.ae"
+assert_ok(h, (fd >= 0), "output file opened");
+#line 49 "rcksum/rcksum_test.ae"
+rcksum_set_target_fd(z, fd);
+#line 52 "rcksum/rcksum_test.ae"
+{ const char* _tmp_old = seed; seed = "xxxBBBBBBBByyyDDDDDDDDzz"; if (_heap_seed) aether_heap_str_free(_tmp_old); _heap_seed = 0; }
+#line 53 "rcksum/rcksum_test.ae"
+rcksum_submit_source_buffer(z, seed, string_length(seed));
+#line 54 "rcksum/rcksum_test.ae"
+assert_eq_int(h, rcksum_blocks_todo(z), 2, "todo=2 after seed (B,D matched)");
+#line 57 "rcksum/rcksum_test.ae"
+rcksum_submit_blocks(z, a, 8, 0, 0);
+#line 58 "rcksum/rcksum_test.ae"
+rcksum_submit_blocks(z, c, 8, 2, 2);
+#line 59 "rcksum/rcksum_test.ae"
+assert_eq_int(h, rcksum_blocks_todo(z), 0, "todo=0 after submitting A,C");
+#line 62 "rcksum/rcksum_test.ae"
+fileio_sync_fd(fd);
+#line 63 "rcksum/rcksum_test.ae"
+        _tuple_string_int _tup1 = fileio_read_at(fd, 32, 0);
+        { const char* _tmp_old = result; result = _tup1._0; if (_heap_result) aether_heap_str_free(_tmp_old); _heap_result = 1; }
+        int rn = _tup1._1;
+#line 64 "rcksum/rcksum_test.ae"
+assert_eq_int(h, rn, 32, "32 bytes reconstructed");
+#line 65 "rcksum/rcksum_test.ae"
+assert_eq_str(h, result, "AAAAAAAABBBBBBBBCCCCCCCCDDDDDDDD", "file == target");
+#line 67 "rcksum/rcksum_test.ae"
+fileio_close_fd(fd);
+#line 68 "rcksum/rcksum_test.ae"
+assert_report(h);
+    }
+    /* deferred */ if (_heap_result) { aether_heap_str_free(result); result = NULL; _heap_result = 0; }
+    /* deferred */ if (_heap_seed) { aether_heap_str_free(seed); seed = NULL; _heap_seed = 0; }
+    /* deferred */ if (_heap_d) { aether_heap_str_free(d); d = NULL; _heap_d = 0; }
+    /* deferred */ if (_heap_c) { aether_heap_str_free(c); c = NULL; _heap_c = 0; }
+    /* deferred */ if (_heap_b) { aether_heap_str_free(b); b = NULL; _heap_b = 0; }
+    /* deferred */ if (_heap_a) { aether_heap_str_free(a); a = NULL; _heap_a = 0; }
+    return 0;
+}

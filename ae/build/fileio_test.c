@@ -445,7 +445,31 @@ int zsync_io_close(int);
 // Extern C function: zsync_io_fsync
 int zsync_io_fsync(int);
 
+// Extern C function: zsync_buf_alloc
+void* zsync_buf_alloc(int64_t);
+
+// Extern C function: zsync_buf_alloc_str
+const char* zsync_buf_alloc_str(int64_t);
+
+// Extern C function: zsync_buf_get
+int zsync_buf_get(void*, int64_t);
+
+// Extern C function: zsync_buf_set
+void zsync_buf_set(void*, int64_t, int);
+
+// Extern C function: zsync_buf_or
+void zsync_buf_or(void*, int64_t, int);
+
+// Extern C function: zsync_buf_free
+void zsync_buf_free(void*);
+
+// Extern C function: zsync_buf_identity
+const char* zsync_buf_identity(void*);
+
 // Extern C function: malloc (libc-provided, declaration skipped)
+// Extern C function: zsync_buf_identity
+const char* zsync_buf_identity(void*);
+
 
 // Import: std.string
 // Import: rcksum.fileio

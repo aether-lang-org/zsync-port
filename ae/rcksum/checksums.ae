@@ -37,6 +37,12 @@ new_rsum(a: int, b: int) -> *RSum {
     return r
 }
 
+// Erase the *RSum type to a bare ptr for storage in a ptr-typed field
+// (cross-module struct types can't yet be struct field types).
+rsum_as_ptr(r: *RSum) -> ptr {
+    return r
+}
+
 rsum_a(r: *RSum) -> int {
     return r.a
 }

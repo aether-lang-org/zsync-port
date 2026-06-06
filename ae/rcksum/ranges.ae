@@ -51,6 +51,11 @@ new_ranges() -> *BlockRanges {
     return z
 }
 
+// Erase the *BlockRanges type to a bare ptr for storage in a ptr field.
+ranges_as_ptr(z: *BlockRanges) -> ptr {
+    return z
+}
+
 count(z: *BlockRanges) -> int {
     return list_size(z.ranges)
 }

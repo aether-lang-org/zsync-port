@@ -1,0 +1,69 @@
+// SPDX-FileCopyrightText: 2004,2005,2007,2009,2025,2026 Colin Phipps <cph@moria.org.uk>
+// SPDX-License-Identifier: Artistic-2.0
+//
+// End-to-end parity test for the rcksum core, mirroring a Go oracle run
+// (internal/rcksum TestE2E): a 4-block target reconstructed from a seed
+// that shares blocks B and D, then the missing blocks A and C submitted.
+//
+//   target = AAAAAAAA BBBBBBBB CCCCCCCC DDDDDDDD  (4 blocks, bs=8)
+//   seed   = xxxBBBBBBBByyyDDDDDDDDzz
+//   Go oracle: after seed todo=2; after submitting A,C todo=0;
+//              file == target.
+
+import std.string (*)
+import std.cryptography
+import rcksum.rcksum
+import rcksum.checksums
+import rcksum.fileio
+import test.assert
+
+// Add a target block's checksums from its 8-byte content.
+add_block(z: ptr, i: int, blk: string) {
+    r = checksums.calc_rsum_block(blk, 8, 0, 8)
+    md = checksums.calc_checksum(blk, 8)
+    rcksum.add_target_block(z, i, checksums.rsum_a(r), checksums.rsum_b(r), md)
+}
+
+main() {
+    println("=== rcksum end-to-end (parity vs Go TestE2E) ===")
+    h = assert.new()
+
+    bs = 8
+    nb = 4
+    a = "AAAAAAAA"
+    b = "BBBBBBBB"
+    c = "CCCCCCCC"
+    d = "DDDDDDDD"
+
+    z = rcksum.new(nb, bs, 4, 16, 1)
+    add_block(z, 0, a)
+    add_block(z, 1, b)
+    add_block(z, 2, c)
+    add_block(z, 3, d)
+
+    assert.eq_int(h, rcksum.blocks_todo(z), 4, "todo=4 before any data")
+
+    // open output file
+    fd = fileio.open_rw("/tmp/zsync_rcksum_e2e.bin")
+    assert.ok(h, fd >= 0, "output file opened")
+    rcksum.set_target_fd(z, fd)
+
+    // feed the seed: shares B and D
+    seed = "xxxBBBBBBBByyyDDDDDDDDzz"
+    rcksum.submit_source_buffer(z, seed, string_length(seed))
+    assert.eq_int(h, rcksum.blocks_todo(z), 2, "todo=2 after seed (B,D matched)")
+
+    // submit the missing target blocks A (block 0) and C (block 2)
+    rcksum.submit_blocks(z, a, 8, 0, 0)
+    rcksum.submit_blocks(z, c, 8, 2, 2)
+    assert.eq_int(h, rcksum.blocks_todo(z), 0, "todo=0 after submitting A,C")
+
+    // read the whole reconstructed file back
+    fileio.sync_fd(fd)
+    result, rn = fileio.read_at(fd, 32, 0)
+    assert.eq_int(h, rn, 32, "32 bytes reconstructed")
+    assert.eq_str(h, result, "AAAAAAAABBBBBBBBCCCCCCCCDDDDDDDD", "file == target")
+
+    fileio.close_fd(fd)
+    assert.report(h)
+}
