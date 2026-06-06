@@ -16,11 +16,17 @@
  * positional I/O to std.fs; this shim is the self-contained stopgap.
  */
 
+/* _GNU_SOURCE for strptime / timegm (and pwrite/pread feature macros). */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <stdlib.h>
+#include <time.h>
+#include <string.h>
 
 /* Open for read+write, create if absent, truncate. mode 0644.
  * Returns the fd, or -1 on failure. */
@@ -133,6 +139,38 @@ void zsync_buf_free(unsigned char *b) {
  * side to wrap with string_new_with_length. */
 char *zsync_buf_identity(unsigned char *b) {
     return (char *)b;
+}
+
+/* Format a Unix epoch time as RFC1123Z in UTC, e.g.
+ * "Mon, 02 Jan 2006 15:04:05 +0000" — the exact shape zsync's MTime
+ * header uses (Go's time.RFC1123Z formatted as UTC). Returned in a
+ * process-lifetime buffer. Returns NULL on failure. std has only an
+ * ISO-8601 "now" formatter, so this fills the gap for arbitrary epochs. */
+char *zsync_rfc1123z(long epoch) {
+    time_t t = (time_t)epoch;
+    struct tm tmv;
+    if (!gmtime_r(&t, &tmv)) return NULL;
+    char *out = (char *)malloc(40);
+    if (!out) return NULL;
+    /* strftime's %z on a gmtime struct may emit "+0000" or be empty
+     * depending on libc, so hard-code "+0000" for UTC. */
+    if (strftime(out, 40, "%a, %d %b %Y %H:%M:%S +0000", &tmv) == 0) {
+        free(out);
+        return NULL;
+    }
+    return out;
+}
+
+/* Parse an RFC1123/RFC1123Z date string back to a Unix epoch (UTC).
+ * Returns -1 on parse failure. Used for If-Modified-Since round-trips. */
+long zsync_parse_rfc1123(const char *s) {
+    if (!s) return -1;
+    struct tm tmv;
+    memset(&tmv, 0, sizeof(tmv));
+    /* Try RFC1123Z (with numeric zone) then RFC1123 (GMT). */
+    char *r = strptime(s, "%a, %d %b %Y %H:%M:%S", &tmv);
+    if (!r) return -1;
+    return (long)timegm(&tmv);
 }
 
 

@@ -346,8 +346,15 @@ static int rcksum_blocks_todo_p(void*);
 static int rcksum_submit_source_buffer_p(void*, const char*, int);
 static void rcksum_submit_blocks_p(void*, const char*, int, int, int);
 static void* rcksum_needed_block_ranges_p(void*);
+static int rcksum_ranges_list_len(void*);
+static int rcksum_ranges_list_start(void*, int);
+static int rcksum_ranges_list_fin(void*, int);
 static _tuple_string_int rcksum_read_known_data_p(void*, int, int);
 static void rcksum_add_target_block_p(void*, int, int, int, const char*);
+static int rcksum_stat_hash_hit_p(void*);
+static int rcksum_stat_weak_hit_p(void*);
+static int rcksum_stat_strong_hit_p(void*);
+static int rcksum_stat_checksummed_p(void*);
 static void rcksum_add_target_block(RcksumState*, int, int, int, const char*);
 static int rcksum_blocks_todo(RcksumState*);
 static int rcksum_calc_rhash(RcksumState*, int);
@@ -380,6 +387,8 @@ static int fileio_buf_get(void*, int);
 static void fileio_buf_set(void*, int, int);
 static void fileio_buf_or(void*, int, int);
 static const char* fileio_buf_to_str(void*, int);
+static const char* fileio_zero_prefix(const char*, int, int);
+static const char* fileio_pad_block(const char*, int, int, int, int);
 static const char* fileio_slice(const char*, int, int, int);
 static const char* fileio_buf_as_string(void*);
 static const char* fileio_dup16(void*);
@@ -413,6 +422,7 @@ static void ranges_add_to_ranges(BlockRanges*, int);
 static int ranges_contains(BlockRanges*, int);
 static int ranges_next_contained_after(BlockRanges*, int);
 static int ranges_list_len(void*);
+static BlockPair* ranges_list_pair(void*, int);
 static void* ranges_missing_blocks_between(BlockRanges*, int, int);
 
 // Extern C function: string_new
@@ -760,6 +770,36 @@ const char* path_extension(const char*);
 // Extern C function: path_is_absolute
 int path_is_absolute(const char*);
 
+// Extern C function: path_clean
+const char* path_clean(const char*);
+
+// Extern C function: path_is_within_base
+int path_is_within_base(const char*, const char*);
+
+// Extern C function: path_rel
+const char* path_rel(const char*, const char*);
+
+// Extern C function: fs_pwrite_raw
+int64_t fs_pwrite_raw(void*, const char*, int, int64_t);
+
+// Extern C function: fs_pread_raw
+int fs_pread_raw(void*, int, int64_t);
+
+// Extern C function: fs_get_pread
+const char* fs_get_pread(void);
+
+// Extern C function: fs_get_pread_length
+int fs_get_pread_length(void);
+
+// Extern C function: fs_release_pread
+void fs_release_pread(void);
+
+// Extern C function: fs_ftruncate_raw
+const char* fs_ftruncate_raw(void*, int64_t);
+
+// Extern C function: fs_fsync_raw
+const char* fs_fsync_raw(void*);
+
 // Extern C function: fs_glob_raw
 void* fs_glob_raw(const char*);
 
@@ -841,6 +881,18 @@ int cryptography_get_binary_digest_length(void);
 // Extern C function: cryptography_release_binary_digest
 void cryptography_release_binary_digest(void);
 
+// Extern C function: cryptography_random_bytes_raw
+int cryptography_random_bytes_raw(int);
+
+// Extern C function: cryptography_get_random_bytes
+const char* cryptography_get_random_bytes(void);
+
+// Extern C function: cryptography_get_random_bytes_length
+int cryptography_get_random_bytes_length(void);
+
+// Extern C function: cryptography_release_random_bytes
+void cryptography_release_random_bytes(void);
+
 // Extern C function: string_new_with_length
 void* string_new_with_length(const char*, int);
 
@@ -891,6 +943,12 @@ void zsync_buf_free(void*);
 
 // Extern C function: zsync_buf_identity
 const char* zsync_buf_identity(void*);
+
+// Extern C function: zsync_rfc1123z
+const char* zsync_rfc1123z(int64_t);
+
+// Extern C function: zsync_parse_rfc1123
+int64_t zsync_parse_rfc1123(const char*);
 
 // Extern C function: zsync_dup16
 const char* zsync_dup16(void*);
@@ -983,83 +1041,83 @@ int s_len = string_length(s);
     return (_tuple_string_int){aether_uniform_heap_str((const char*)(string_substring(s, prefix_len, s_len)), 1), 1};
 }
 
-#line 365 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 384 "/home/paul/scm/aether/build/../std/fs/module.ae"
 static const char* fs_mkdir_p(const char* path) {
-#line 366 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 385 "/home/paul/scm/aether/build/../std/fs/module.ae"
 int ok = fs_mkdir_p_raw(aether_string_data(path));
 if (ok == 0) {
         {
-#line 368 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 387 "/home/paul/scm/aether/build/../std/fs/module.ae"
             return "cannot mkdir -p";
         }
     }
-#line 370 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 389 "/home/paul/scm/aether/build/../std/fs/module.ae"
     return "";
 }
 
-#line 515 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 534 "/home/paul/scm/aether/build/../std/fs/module.ae"
 static _tuple_string_int_string fs_read_binary(const char* path) {
-#line 521 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 540 "/home/paul/scm/aether/build/../std/fs/module.ae"
     return fs_read_binary_tuple(aether_string_data(path));
 }
 
-#line 72 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 80 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 static _tuple_string_string cryptography_sha1_hex(const char* data, int length) {
     int _heap_out = 0; (void)_heap_out;
     const char* out = NULL;
-#line 73 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 81 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 { const char* _tmp_old = out; out = cryptography_sha1_hex_raw(aether_string_data(data), length); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 0; }
 if (out == 0) {
         {
-#line 75 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 83 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
             return (_tuple_string_string){aether_uniform_heap_str((const char*)(""), 0), "openssl unavailable"};
         }
     }
-#line 77 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 85 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
     return (_tuple_string_string){aether_uniform_heap_str((const char*)(out), _heap_out), ""};
 }
 
-#line 143 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 151 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 static _tuple_string_string cryptography_base64_encode_padded(const char* data, int length) {
     int _heap_out = 0; (void)_heap_out;
     const char* out = NULL;
-#line 144 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 152 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 { const char* _tmp_old = out; out = cryptography_base64_encode_padded_raw(aether_string_data(data), length); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 0; }
 if (out == 0) {
         {
-#line 146 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 154 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
             return (_tuple_string_string){aether_uniform_heap_str((const char*)(""), 0), "openssl unavailable"};
         }
     }
-#line 148 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 156 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
     return (_tuple_string_string){aether_uniform_heap_str((const char*)(out), _heap_out), ""};
 }
 
-#line 236 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 244 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 static _tuple_string_int_string cryptography_md4_bytes(const char* data, int length) {
     int _heap_raw = 0; (void)_heap_raw;
     const char* raw = NULL;
     int _heap_owned = 0; (void)_heap_owned;
     const char* owned = NULL;
-#line 237 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 245 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 int ok = cryptography_md4_bytes_raw(aether_string_data(data), length);
 if (ok == 0) {
         {
-#line 239 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 247 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
             _tuple_string_int_string _builder_ret = (_tuple_string_int_string){aether_uniform_heap_str((const char*)(""), 0), 0, "md4 unavailable"};
             /* deferred */ if (_heap_raw) { aether_heap_str_free(raw); raw = NULL; _heap_raw = 0; }
             return _builder_ret;
         }
     }
-#line 241 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 249 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 { const char* _tmp_old = raw; raw = cryptography_get_binary_digest(); if (_heap_raw) aether_heap_str_free(_tmp_old); _heap_raw = 0; }
-#line 242 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 250 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 int n = cryptography_get_binary_digest_length();
-#line 243 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 251 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 { const char* _tmp_old = owned; owned = string_new_with_length(raw, n); if (_heap_owned) aether_heap_str_free(_tmp_old); _heap_owned = 1; }
-#line 244 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 252 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 cryptography_release_binary_digest();
-#line 245 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 253 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
     _tuple_string_int_string _builder_ret = (_tuple_string_int_string){aether_uniform_heap_str((const char*)(owned), _heap_owned), n, ""};
     /* deferred */ if (_heap_raw) { aether_heap_str_free(raw); raw = NULL; _heap_raw = 0; }
     return _builder_ret;
@@ -1827,109 +1885,159 @@ static void* rcksum_needed_block_ranges_p(void* z) {
     return rcksum_needed_block_ranges(((RcksumState*)(z)));
 }
 
-#line 198 "rcksum/rcksum.ae"
+#line 200 "rcksum/rcksum.ae"
+static int rcksum_ranges_list_len(void* l) {
+#line 201 "rcksum/rcksum.ae"
+    return ranges_list_len(l);
+}
+
+#line 204 "rcksum/rcksum.ae"
+static int rcksum_ranges_list_start(void* l, int i) {
+#line 205 "rcksum/rcksum.ae"
+    return ranges_pair_start(ranges_list_pair(l, i));
+}
+
+#line 208 "rcksum/rcksum.ae"
+static int rcksum_ranges_list_fin(void* l, int i) {
+#line 209 "rcksum/rcksum.ae"
+    return ranges_pair_fin(ranges_list_pair(l, i));
+}
+
+#line 212 "rcksum/rcksum.ae"
 static _tuple_string_int rcksum_read_known_data_p(void* z, int len, int offset) {
-#line 199 "rcksum/rcksum.ae"
+#line 213 "rcksum/rcksum.ae"
     return rcksum_read_known_data(((RcksumState*)(z)), len, offset);
 }
 
-#line 202 "rcksum/rcksum.ae"
+#line 216 "rcksum/rcksum.ae"
 static void rcksum_add_target_block_p(void* z, int b, int rsum_a, int rsum_b, const char* md4) {
-#line 203 "rcksum/rcksum.ae"
+#line 217 "rcksum/rcksum.ae"
 rcksum_add_target_block(((RcksumState*)(z)), b, rsum_a, rsum_b, md4);
 }
 
-#line 207 "rcksum/rcksum.ae"
+#line 221 "rcksum/rcksum.ae"
+static int rcksum_stat_hash_hit_p(void* z) {
+#line 222 "rcksum/rcksum.ae"
+RcksumState* s = ((RcksumState*)(z));
+#line 223 "rcksum/rcksum.ae"
+    return s->stats->hash_hit;
+}
+
+#line 225 "rcksum/rcksum.ae"
+static int rcksum_stat_weak_hit_p(void* z) {
+#line 226 "rcksum/rcksum.ae"
+RcksumState* s = ((RcksumState*)(z));
+#line 227 "rcksum/rcksum.ae"
+    return s->stats->weak_hit;
+}
+
+#line 229 "rcksum/rcksum.ae"
+static int rcksum_stat_strong_hit_p(void* z) {
+#line 230 "rcksum/rcksum.ae"
+RcksumState* s = ((RcksumState*)(z));
+#line 231 "rcksum/rcksum.ae"
+    return s->stats->strong_hit;
+}
+
+#line 233 "rcksum/rcksum.ae"
+static int rcksum_stat_checksummed_p(void* z) {
+#line 234 "rcksum/rcksum.ae"
+RcksumState* s = ((RcksumState*)(z));
+#line 235 "rcksum/rcksum.ae"
+    return s->stats->checksummed;
+}
+
+#line 239 "rcksum/rcksum.ae"
 static void rcksum_add_target_block(RcksumState* z, int b, int rsum_a, int rsum_b, const char* md4) {
 if (b < z->blocks) {
         {
-#line 209 "rcksum/rcksum.ae"
+#line 241 "rcksum/rcksum.ae"
 HashEntry* e = rcksum_entry_at(z, b);
-#line 210 "rcksum/rcksum.ae"
+#line 242 "rcksum/rcksum.ae"
 (e->md4 = md4);
-#line 211 "rcksum/rcksum.ae"
+#line 243 "rcksum/rcksum.ae"
 (e->rsum_a = (rsum_a & z->rsum_a_mask));
-#line 212 "rcksum/rcksum.ae"
+#line 244 "rcksum/rcksum.ae"
 (e->rsum_b = (rsum_b & 0xffff));
-#line 214 "rcksum/rcksum.ae"
+#line 246 "rcksum/rcksum.ae"
 (z->rsum_hash = NULL);
-#line 215 "rcksum/rcksum.ae"
+#line 247 "rcksum/rcksum.ae"
 (z->bit_hash = NULL);
         }
     }
 }
 
-#line 219 "rcksum/rcksum.ae"
+#line 251 "rcksum/rcksum.ae"
 static int rcksum_blocks_todo(RcksumState* z) {
-#line 220 "rcksum/rcksum.ae"
+#line 252 "rcksum/rcksum.ae"
     return (z->blocks - ranges_got_blocks(z->known));
 }
 
-#line 224 "rcksum/rcksum.ae"
+#line 256 "rcksum/rcksum.ae"
 static int rcksum_calc_rhash(RcksumState* z, int b) {
-#line 225 "rcksum/rcksum.ae"
+#line 257 "rcksum/rcksum.ae"
 HashEntry* e1 = rcksum_entry_at(z, b);
-#line 226 "rcksum/rcksum.ae"
+#line 258 "rcksum/rcksum.ae"
 RSum* rs1 = checksums_new_rsum(e1->rsum_a, e1->rsum_b);
 if (z->seq_matches > 1) {
         {
-#line 228 "rcksum/rcksum.ae"
+#line 260 "rcksum/rcksum.ae"
 HashEntry* e2 = rcksum_entry_at(z, (b + 1));
-#line 229 "rcksum/rcksum.ae"
+#line 261 "rcksum/rcksum.ae"
 RSum* rs2 = checksums_new_rsum(e2->rsum_a, e2->rsum_b);
-#line 230 "rcksum/rcksum.ae"
+#line 262 "rcksum/rcksum.ae"
             return checksums_calc_rhash_from_rsums(rs1, rs2, z->seq_matches, z->rsum_a_mask);
         }
     }
-#line 232 "rcksum/rcksum.ae"
+#line 264 "rcksum/rcksum.ae"
     return checksums_calc_rhash_from_rsums(rs1, rs1, z->seq_matches, z->rsum_a_mask);
 }
 
-#line 236 "rcksum/rcksum.ae"
+#line 268 "rcksum/rcksum.ae"
 static const char* rcksum_hkey(int h) {
-#line 237 "rcksum/rcksum.ae"
+#line 269 "rcksum/rcksum.ae"
     return aether_uniform_heap_str((const char*)(string_from_int((h & 0xffffffff))), 1);
 }
 
-#line 240 "rcksum/rcksum.ae"
+#line 272 "rcksum/rcksum.ae"
 static int rcksum_rsum_hash_get(RcksumState* z, int h) {
-#line 241 "rcksum/rcksum.ae"
+#line 273 "rcksum/rcksum.ae"
 void* v = ({ const char* _ad_0 = (const char*)(rcksum_hkey(h)); void* _ad_r = map_get_raw(z->rsum_hash, aether_string_data(_ad_0)); aether_heap_str_free(_ad_0); _ad_r; });
 if (v == NULL) {
         {
-#line 243 "rcksum/rcksum.ae"
+#line 275 "rcksum/rcksum.ae"
             return rcksum_NO_BLOCK();
         }
     }
-#line 245 "rcksum/rcksum.ae"
+#line 277 "rcksum/rcksum.ae"
     return (rcksum_unbox_int(v) - 1);
 }
 
-#line 248 "rcksum/rcksum.ae"
+#line 280 "rcksum/rcksum.ae"
 static void rcksum_rsum_hash_put(RcksumState* z, int h, int id) {
-#line 249 "rcksum/rcksum.ae"
+#line 281 "rcksum/rcksum.ae"
 ({ const char* _ad_1 = (const char*)(rcksum_hkey(h)); int _ad_r = map_put_raw(z->rsum_hash, aether_string_data(_ad_1), rcksum_box_int((id + 1))); aether_heap_str_free(_ad_1); _ad_r; });
 }
 
-#line 252 "rcksum/rcksum.ae"
+#line 284 "rcksum/rcksum.ae"
 static void rcksum_rsum_hash_del(RcksumState* z, int h) {
-#line 253 "rcksum/rcksum.ae"
+#line 285 "rcksum/rcksum.ae"
 map_remove(z->rsum_hash, aether_string_data(rcksum_hkey(h)));
 }
 
-#line 257 "rcksum/rcksum.ae"
+#line 289 "rcksum/rcksum.ae"
 static void rcksum_build_hash(RcksumState* z) {
-#line 258 "rcksum/rcksum.ae"
+#line 290 "rcksum/rcksum.ae"
 (z->rsum_hash = map_new());
-#line 260 "rcksum/rcksum.ae"
+#line 292 "rcksum/rcksum.ae"
 int bit_hash_bits = (checksums_log2(z->blocks) + rcksum_BITHASH_BITS());
-#line 261 "rcksum/rcksum.ae"
+#line 293 "rcksum/rcksum.ae"
 (z->bit_hash_mask = ((1 << bit_hash_bits) - 1));
-#line 262 "rcksum/rcksum.ae"
+#line 294 "rcksum/rcksum.ae"
 (z->bit_hash_len = (((z->bit_hash_mask + 1) + 7) >> 3));
-#line 263 "rcksum/rcksum.ae"
+#line 295 "rcksum/rcksum.ae"
 (z->bit_hash = fileio_buf_alloc(z->bit_hash_len));
-#line 266 "rcksum/rcksum.ae"
+#line 298 "rcksum/rcksum.ae"
 int id = (z->blocks - z->seq_matches);
     int h;
     int nxt;
@@ -1938,64 +2046,64 @@ int id = (z->blocks - z->seq_matches);
     int bit_pos;
 while (id >= 0) {
         {
-#line 268 "rcksum/rcksum.ae"
+#line 300 "rcksum/rcksum.ae"
 h = rcksum_calc_rhash(z, id);
-#line 269 "rcksum/rcksum.ae"
+#line 301 "rcksum/rcksum.ae"
 nxt = rcksum_rsum_hash_get(z, h);
-#line 270 "rcksum/rcksum.ae"
+#line 302 "rcksum/rcksum.ae"
 e = rcksum_entry_at(z, id);
-#line 271 "rcksum/rcksum.ae"
+#line 303 "rcksum/rcksum.ae"
 (e->next = nxt);
-#line 272 "rcksum/rcksum.ae"
+#line 304 "rcksum/rcksum.ae"
 rcksum_rsum_hash_put(z, h, id);
-#line 274 "rcksum/rcksum.ae"
+#line 306 "rcksum/rcksum.ae"
 bit_idx = ((h & z->bit_hash_mask) >> 3);
-#line 275 "rcksum/rcksum.ae"
+#line 307 "rcksum/rcksum.ae"
 bit_pos = (h & 7);
 if (bit_idx < z->bit_hash_len) {
                 {
-#line 277 "rcksum/rcksum.ae"
+#line 309 "rcksum/rcksum.ae"
 fileio_buf_or(z->bit_hash, bit_idx, (1 << bit_pos));
                 }
             }
-#line 279 "rcksum/rcksum.ae"
+#line 311 "rcksum/rcksum.ae"
 id = (id - 1);
         }
     }
 }
 
-#line 284 "rcksum/rcksum.ae"
+#line 316 "rcksum/rcksum.ae"
 static void rcksum_remove_block_from_hash(RcksumState* z, int id) {
 if (z->rsum_hash == NULL) {
         {
-#line 286 "rcksum/rcksum.ae"
+#line 318 "rcksum/rcksum.ae"
             return;
         }
     }
 if (id >= (z->blocks - (z->seq_matches - 1))) {
         {
-#line 289 "rcksum/rcksum.ae"
+#line 321 "rcksum/rcksum.ae"
             return;
         }
     }
-#line 291 "rcksum/rcksum.ae"
+#line 323 "rcksum/rcksum.ae"
 int h = rcksum_calc_rhash(z, id);
-#line 292 "rcksum/rcksum.ae"
+#line 324 "rcksum/rcksum.ae"
 int p = rcksum_rsum_hash_get(z, h);
 if (p == id) {
         {
-#line 294 "rcksum/rcksum.ae"
+#line 326 "rcksum/rcksum.ae"
 HashEntry* e = rcksum_entry_at(z, id);
-#line 295 "rcksum/rcksum.ae"
+#line 327 "rcksum/rcksum.ae"
 int nxt = e->next;
 if (nxt != rcksum_NO_BLOCK()) {
                 {
-#line 297 "rcksum/rcksum.ae"
+#line 329 "rcksum/rcksum.ae"
 rcksum_rsum_hash_put(z, h, nxt);
                 }
             } else {
                 {
-#line 299 "rcksum/rcksum.ae"
+#line 331 "rcksum/rcksum.ae"
 rcksum_rsum_hash_del(z, h);
                 }
             }
@@ -2006,18 +2114,18 @@ if (p != rcksum_NO_BLOCK()) {
                 HashEntry* pe;
 while (p != rcksum_NO_BLOCK()) {
                     {
-#line 303 "rcksum/rcksum.ae"
+#line 335 "rcksum/rcksum.ae"
 pe = rcksum_entry_at(z, p);
 if (pe->next == id) {
                             {
-#line 305 "rcksum/rcksum.ae"
+#line 337 "rcksum/rcksum.ae"
 (pe->next = rcksum_entry_at(z, id)->next);
-#line 306 "rcksum/rcksum.ae"
+#line 338 "rcksum/rcksum.ae"
 p = rcksum_NO_BLOCK();
                             }
                         } else {
                             {
-#line 308 "rcksum/rcksum.ae"
+#line 340 "rcksum/rcksum.ae"
 p = pe->next;
                             }
                         }
@@ -2026,80 +2134,80 @@ p = pe->next;
             }
         }
     }
-#line 312 "rcksum/rcksum.ae"
+#line 344 "rcksum/rcksum.ae"
 (rcksum_entry_at(z, id)->next = rcksum_NO_BLOCK());
 }
 
-#line 316 "rcksum/rcksum.ae"
+#line 348 "rcksum/rcksum.ae"
 static void* rcksum_needed_block_ranges(RcksumState* z) {
-#line 317 "rcksum/rcksum.ae"
+#line 349 "rcksum/rcksum.ae"
     return ranges_missing_blocks_between(z->known, 0, (z->blocks - 1));
 }
 
-#line 326 "rcksum/rcksum.ae"
+#line 358 "rcksum/rcksum.ae"
 static int rcksum_prefix_eq(const char* a, int a_len, const char* b, int b_len, int n) {
-#line 327 "rcksum/rcksum.ae"
+#line 359 "rcksum/rcksum.ae"
 int i = 0;
     int ca;
     int cb;
 while (i < n) {
         {
-#line 329 "rcksum/rcksum.ae"
+#line 361 "rcksum/rcksum.ae"
 ca = (string_char_at_n(a, a_len, i) & 0xff);
-#line 330 "rcksum/rcksum.ae"
+#line 362 "rcksum/rcksum.ae"
 cb = (string_char_at_n(b, b_len, i) & 0xff);
 if (ca != cb) {
                 {
-#line 332 "rcksum/rcksum.ae"
+#line 364 "rcksum/rcksum.ae"
                     return 0;
                 }
             }
-#line 334 "rcksum/rcksum.ae"
+#line 366 "rcksum/rcksum.ae"
 i = (i + 1);
         }
     }
-#line 336 "rcksum/rcksum.ae"
+#line 368 "rcksum/rcksum.ae"
     return 1;
 }
 
-#line 344 "rcksum/rcksum.ae"
+#line 376 "rcksum/rcksum.ae"
 static int rcksum_write_blocks(RcksumState* z, const char* data, int data_len, int bfrom, int bto, int next) {
-#line 345 "rcksum/rcksum.ae"
+#line 377 "rcksum/rcksum.ae"
 int span = (((bto + 1) - bfrom) << z->block_shift);
-#line 346 "rcksum/rcksum.ae"
+#line 378 "rcksum/rcksum.ae"
 int offset = (bfrom << z->block_shift);
-#line 347 "rcksum/rcksum.ae"
+#line 379 "rcksum/rcksum.ae"
 fileio_write_at(z->fd, data, span, offset);
-#line 349 "rcksum/rcksum.ae"
+#line 381 "rcksum/rcksum.ae"
 int id = bfrom;
 while (id <= bto) {
         {
 if (id == next) {
                 {
-#line 352 "rcksum/rcksum.ae"
+#line 384 "rcksum/rcksum.ae"
 next = rcksum_entry_at(z, id)->next;
                 }
             }
-#line 354 "rcksum/rcksum.ae"
+#line 386 "rcksum/rcksum.ae"
 ranges_add_to_ranges(z->known, id);
 if (z->seq_matches == 2) {
                 {
 if (id != bto) {
                         {
-#line 357 "rcksum/rcksum.ae"
+#line 389 "rcksum/rcksum.ae"
 rcksum_remove_block_from_hash(z, id);
                         }
                     } else {
 if (ranges_contains(z->known, (bto + 1)) == 1) {
                             {
-#line 359 "rcksum/rcksum.ae"
+#line 391 "rcksum/rcksum.ae"
 rcksum_remove_block_from_hash(z, id);
                             }
                         }
                     }
                 }
             }
-#line 362 "rcksum/rcksum.ae"
+#line 394 "rcksum/rcksum.ae"
 id = (id + 1);
         }
     }
@@ -2109,7 +2217,7 @@ if (bfrom > 0) {
                 {
 if (ranges_contains(z->known, (bfrom - 1)) == 1) {
                         {
-#line 367 "rcksum/rcksum.ae"
+#line 399 "rcksum/rcksum.ae"
 rcksum_remove_block_from_hash(z, (bfrom - 1));
                         }
                     }
@@ -2117,11 +2225,11 @@ rcksum_remove_block_from_hash(z, (bfrom - 1));
             }
         }
     }
-#line 371 "rcksum/rcksum.ae"
+#line 403 "rcksum/rcksum.ae"
     return next;
 }
 
-#line 377 "rcksum/rcksum.ae"
+#line 409 "rcksum/rcksum.ae"
 static void rcksum_submit_blocks(RcksumState* z, const char* data, int data_len, int bfrom, int bto) {
     int _heap_block = 0; (void)_heap_block;
     const char* block = NULL;
@@ -2133,40 +2241,40 @@ static void rcksum_submit_blocks(RcksumState* z, const char* data, int data_len,
     const char* prefix = NULL;
 if (z->rsum_hash == NULL) {
         {
-#line 379 "rcksum/rcksum.ae"
+#line 411 "rcksum/rcksum.ae"
 rcksum_build_hash(z);
         }
     }
-#line 381 "rcksum/rcksum.ae"
+#line 413 "rcksum/rcksum.ae"
 int x = bfrom;
     int off;
 while (x <= bto) {
         {
-#line 383 "rcksum/rcksum.ae"
+#line 415 "rcksum/rcksum.ae"
 off = ((x - bfrom) << z->block_shift);
-#line 384 "rcksum/rcksum.ae"
+#line 416 "rcksum/rcksum.ae"
 { const char* _tmp_old = block; block = fileio_slice(data, data_len, off, z->block_size); if (_heap_block) aether_heap_str_free(_tmp_old); _heap_block = 1; }
-#line 385 "rcksum/rcksum.ae"
+#line 417 "rcksum/rcksum.ae"
 { const char* _tmp_old = md; md = checksums_calc_checksum(block, z->block_size); if (_heap_md) aether_heap_str_free(_tmp_old); _heap_md = 0; }
-#line 386 "rcksum/rcksum.ae"
+#line 418 "rcksum/rcksum.ae"
 { const char* _tmp_old = stored; stored = rcksum_entry_at(z, x)->md4; if (_heap_stored) aether_heap_str_free(_tmp_old); _heap_stored = 0; }
 if (rcksum_prefix_eq(md, 16, stored, 16, z->checksum_bytes) == 0) {
                 {
-#line 388 "rcksum/rcksum.ae"
+#line 420 "rcksum/rcksum.ae"
                     break;
                 }
             }
-#line 390 "rcksum/rcksum.ae"
+#line 422 "rcksum/rcksum.ae"
 x = (x + 1);
         }
     }
 if (x > bfrom) {
         {
-#line 395 "rcksum/rcksum.ae"
+#line 427 "rcksum/rcksum.ae"
 int span_len = ((x - bfrom) << z->block_shift);
-#line 396 "rcksum/rcksum.ae"
+#line 428 "rcksum/rcksum.ae"
 { const char* _tmp_old = prefix; prefix = fileio_slice(data, data_len, 0, span_len); if (_heap_prefix) aether_heap_str_free(_tmp_old); _heap_prefix = 1; }
-#line 397 "rcksum/rcksum.ae"
+#line 429 "rcksum/rcksum.ae"
 rcksum_write_blocks(z, prefix, span_len, bfrom, (x - 1), rcksum_NO_BLOCK());
         }
     }
@@ -2176,47 +2284,47 @@ rcksum_write_blocks(z, prefix, span_len, bfrom, (x - 1), rcksum_NO_BLOCK());
     /* deferred */ if (_heap_block) { aether_heap_str_free(block); block = NULL; _heap_block = 0; }
 }
 
-#line 404 "rcksum/rcksum.ae"
+#line 436 "rcksum/rcksum.ae"
 static int rcksum_match_block(RcksumState* z, const char* data, int data_len, int doff) {
-#line 405 "rcksum/rcksum.ae"
+#line 437 "rcksum/rcksum.ae"
 int h = checksums_calc_rhash_from_rsums(z->r0, z->r1, z->seq_matches, z->rsum_a_mask);
-#line 407 "rcksum/rcksum.ae"
+#line 439 "rcksum/rcksum.ae"
 int bit_idx = ((h & z->bit_hash_mask) >> 3);
-#line 408 "rcksum/rcksum.ae"
+#line 440 "rcksum/rcksum.ae"
 int bit_pos = (h & 7);
 if (z->bit_hash == NULL) {
         {
-#line 410 "rcksum/rcksum.ae"
+#line 442 "rcksum/rcksum.ae"
             return 0;
         }
     }
 if (bit_idx >= z->bit_hash_len) {
         {
-#line 413 "rcksum/rcksum.ae"
+#line 445 "rcksum/rcksum.ae"
             return 0;
         }
     }
-#line 415 "rcksum/rcksum.ae"
+#line 447 "rcksum/rcksum.ae"
 int bv = fileio_buf_get(z->bit_hash, bit_idx);
 if ((bv & (1 << bit_pos)) == 0) {
         {
-#line 417 "rcksum/rcksum.ae"
+#line 449 "rcksum/rcksum.ae"
             return 0;
         }
     }
-#line 419 "rcksum/rcksum.ae"
+#line 451 "rcksum/rcksum.ae"
 int e = rcksum_rsum_hash_get(z, h);
 if (e == rcksum_NO_BLOCK()) {
         {
-#line 421 "rcksum/rcksum.ae"
+#line 453 "rcksum/rcksum.ae"
             return 0;
         }
     }
-#line 423 "rcksum/rcksum.ae"
+#line 455 "rcksum/rcksum.ae"
     return rcksum_check_chain(z, e, data, data_len, doff);
 }
 
-#line 429 "rcksum/rcksum.ae"
+#line 461 "rcksum/rcksum.ae"
 static int rcksum_check_chain(RcksumState* z, int id, const char* data, int data_len, int doff) {
     int _heap_md_cache0 = 0; (void)_heap_md_cache0;
     const char* md_cache0 = NULL;
@@ -2232,15 +2340,15 @@ static int rcksum_check_chain(RcksumState* z, int id, const char* data, int data
     const char* stored = NULL;
     int _heap_prefix = 0; (void)_heap_prefix;
     const char* prefix = NULL;
-#line 430 "rcksum/rcksum.ae"
+#line 462 "rcksum/rcksum.ae"
 int got = 0;
-#line 432 "rcksum/rcksum.ae"
+#line 464 "rcksum/rcksum.ae"
 { const char* _tmp_old = md_cache0; md_cache0 = ""; if (_heap_md_cache0) aether_heap_str_free(_tmp_old); _heap_md_cache0 = 0; }
-#line 433 "rcksum/rcksum.ae"
+#line 465 "rcksum/rcksum.ae"
 { const char* _tmp_old = md_cache1; md_cache1 = ""; if (_heap_md_cache1) aether_heap_str_free(_tmp_old); _heap_md_cache1 = 0; }
-#line 434 "rcksum/rcksum.ae"
+#line 466 "rcksum/rcksum.ae"
 int cached = 0;
-#line 436 "rcksum/rcksum.ae"
+#line 468 "rcksum/rcksum.ae"
 int next = id;
     HashEntry* e0;
     HashEntry* e1;
@@ -2252,143 +2360,143 @@ int next = id;
     int span_len;
 while (next != rcksum_NO_BLOCK()) {
         {
-#line 438 "rcksum/rcksum.ae"
+#line 470 "rcksum/rcksum.ae"
 id = next;
-#line 439 "rcksum/rcksum.ae"
+#line 471 "rcksum/rcksum.ae"
 next = rcksum_entry_at(z, id)->next;
-#line 441 "rcksum/rcksum.ae"
+#line 473 "rcksum/rcksum.ae"
 (z->stats->hash_hit = (z->stats->hash_hit + 1));
-#line 442 "rcksum/rcksum.ae"
+#line 474 "rcksum/rcksum.ae"
 e0 = rcksum_entry_at(z, id);
 if (e0->rsum_a != (checksums_rsum_a(z->r0) & z->rsum_a_mask)) {
                 {
-#line 444 "rcksum/rcksum.ae"
+#line 476 "rcksum/rcksum.ae"
                     continue;
                 }
             }
 if (e0->rsum_b != checksums_rsum_b(z->r0)) {
                 {
-#line 447 "rcksum/rcksum.ae"
+#line 479 "rcksum/rcksum.ae"
                     continue;
                 }
             }
 if (z->seq_matches > 1) {
                 {
-#line 450 "rcksum/rcksum.ae"
+#line 482 "rcksum/rcksum.ae"
 e1 = rcksum_entry_at(z, (id + 1));
 if (e1->rsum_a != (checksums_rsum_a(z->r1) & z->rsum_a_mask)) {
                         {
-#line 452 "rcksum/rcksum.ae"
+#line 484 "rcksum/rcksum.ae"
                             continue;
                         }
                     }
 if (e1->rsum_b != checksums_rsum_b(z->r1)) {
                         {
-#line 455 "rcksum/rcksum.ae"
+#line 487 "rcksum/rcksum.ae"
                             continue;
                         }
                     }
                 }
             }
-#line 458 "rcksum/rcksum.ae"
+#line 490 "rcksum/rcksum.ae"
 (z->stats->weak_hit = (z->stats->weak_hit + 1));
-#line 461 "rcksum/rcksum.ae"
+#line 493 "rcksum/rcksum.ae"
 matching = 0;
-#line 462 "rcksum/rcksum.ae"
+#line 494 "rcksum/rcksum.ae"
 checkmd4 = 0;
 while (checkmd4 < z->seq_matches) {
                 {
 if (checkmd4 >= cached) {
                         {
-#line 465 "rcksum/rcksum.ae"
+#line 497 "rcksum/rcksum.ae"
 boff = (doff + (checkmd4 * z->block_size));
 if ((boff + z->block_size) > data_len) {
                                 {
-#line 467 "rcksum/rcksum.ae"
+#line 499 "rcksum/rcksum.ae"
                                     break;
                                 }
                             }
-#line 469 "rcksum/rcksum.ae"
+#line 501 "rcksum/rcksum.ae"
 { const char* _tmp_old = block; block = fileio_slice(data, data_len, boff, z->block_size); if (_heap_block) aether_heap_str_free(_tmp_old); _heap_block = 1; }
-#line 470 "rcksum/rcksum.ae"
+#line 502 "rcksum/rcksum.ae"
 { const char* _tmp_old = md; md = checksums_calc_checksum(block, z->block_size); if (_heap_md) aether_heap_str_free(_tmp_old); _heap_md = 0; }
 if (checkmd4 == 0) {
                                 {
-#line 472 "rcksum/rcksum.ae"
+#line 504 "rcksum/rcksum.ae"
 { const char* _tmp_old = md_cache0; md_cache0 = aether_uniform_heap_str(md, 0); if (_heap_md_cache0) aether_heap_str_free(_tmp_old); _heap_md_cache0 = 1; }
                                 }
                             } else {
                                 {
-#line 474 "rcksum/rcksum.ae"
+#line 506 "rcksum/rcksum.ae"
 { const char* _tmp_old = md_cache1; md_cache1 = aether_uniform_heap_str(md, 0); if (_heap_md_cache1) aether_heap_str_free(_tmp_old); _heap_md_cache1 = 1; }
                                 }
                             }
-#line 476 "rcksum/rcksum.ae"
+#line 508 "rcksum/rcksum.ae"
 cached = (cached + 1);
-#line 477 "rcksum/rcksum.ae"
+#line 509 "rcksum/rcksum.ae"
 (z->stats->checksummed = (z->stats->checksummed + 1));
                         }
                     }
-#line 479 "rcksum/rcksum.ae"
+#line 511 "rcksum/rcksum.ae"
 { const char* _tmp_old = cand; cand = md_cache0; if (_heap_cand) aether_heap_str_free(_tmp_old); _heap_cand = _heap_md_cache0; _heap_md_cache0 = 0; }
 if (checkmd4 == 1) {
                         {
-#line 481 "rcksum/rcksum.ae"
+#line 513 "rcksum/rcksum.ae"
 { const char* _tmp_old = cand; cand = md_cache1; if (_heap_cand) aether_heap_str_free(_tmp_old); _heap_cand = _heap_md_cache1; _heap_md_cache1 = 0; }
                         }
                     }
-#line 483 "rcksum/rcksum.ae"
+#line 515 "rcksum/rcksum.ae"
 { const char* _tmp_old = stored; stored = rcksum_entry_at(z, (id + checkmd4))->md4; if (_heap_stored) aether_heap_str_free(_tmp_old); _heap_stored = 0; }
 if (rcksum_prefix_eq(cand, 16, stored, 16, z->checksum_bytes) == 1) {
                         {
-#line 485 "rcksum/rcksum.ae"
+#line 517 "rcksum/rcksum.ae"
 matching = (matching + 1);
                         }
                     } else {
                         {
-#line 487 "rcksum/rcksum.ae"
+#line 519 "rcksum/rcksum.ae"
                             break;
                         }
                     }
-#line 489 "rcksum/rcksum.ae"
+#line 521 "rcksum/rcksum.ae"
 checkmd4 = (checkmd4 + 1);
                 }
             }
 if (matching < z->seq_matches) {
                 {
-#line 493 "rcksum/rcksum.ae"
+#line 525 "rcksum/rcksum.ae"
                     continue;
                 }
             }
-#line 496 "rcksum/rcksum.ae"
+#line 528 "rcksum/rcksum.ae"
 (z->stats->strong_hit = (z->stats->strong_hit + matching));
-#line 497 "rcksum/rcksum.ae"
+#line 529 "rcksum/rcksum.ae"
 next_known = ranges_next_contained_after(z->known, id);
 if (next_known == (-(1))) {
                 {
-#line 499 "rcksum/rcksum.ae"
+#line 531 "rcksum/rcksum.ae"
 next_known = z->blocks;
                 }
             }
-#line 501 "rcksum/rcksum.ae"
+#line 533 "rcksum/rcksum.ae"
 num_write = matching;
 if (next_known < (id + matching)) {
                 {
-#line 503 "rcksum/rcksum.ae"
+#line 535 "rcksum/rcksum.ae"
 num_write = (next_known - id);
                 }
             }
-#line 506 "rcksum/rcksum.ae"
+#line 538 "rcksum/rcksum.ae"
 span_len = (num_write * z->block_size);
-#line 507 "rcksum/rcksum.ae"
+#line 539 "rcksum/rcksum.ae"
 { const char* _tmp_old = prefix; prefix = fileio_slice(data, data_len, doff, span_len); if (_heap_prefix) aether_heap_str_free(_tmp_old); _heap_prefix = 1; }
-#line 508 "rcksum/rcksum.ae"
+#line 540 "rcksum/rcksum.ae"
 next = rcksum_write_blocks(z, prefix, span_len, id, ((id + num_write) - 1), next);
-#line 509 "rcksum/rcksum.ae"
+#line 541 "rcksum/rcksum.ae"
 got = (got + num_write);
         }
     }
-#line 511 "rcksum/rcksum.ae"
+#line 543 "rcksum/rcksum.ae"
     int _builder_ret = got;
     /* deferred */ if (_heap_prefix) { aether_heap_str_free(prefix); prefix = NULL; _heap_prefix = 0; }
     /* deferred */ if (_heap_stored) { aether_heap_str_free(stored); stored = NULL; _heap_stored = 0; }
@@ -2407,29 +2515,29 @@ got = (got + num_write);
     /* deferred */ if (_heap_md_cache0) { aether_heap_str_free(md_cache0); md_cache0 = NULL; _heap_md_cache0 = 0; }
 }
 
-#line 517 "rcksum/rcksum.ae"
+#line 549 "rcksum/rcksum.ae"
 static int rcksum_submit_source_data(RcksumState* z, const char* data, int data_len, int offset) {
-#line 518 "rcksum/rcksum.ae"
+#line 550 "rcksum/rcksum.ae"
 int x = 0;
-#line 519 "rcksum/rcksum.ae"
+#line 551 "rcksum/rcksum.ae"
 int got = 0;
-#line 520 "rcksum/rcksum.ae"
+#line 552 "rcksum/rcksum.ae"
 int x_limit = (data_len - z->context);
 if (offset != 0) {
         {
-#line 523 "rcksum/rcksum.ae"
+#line 555 "rcksum/rcksum.ae"
 x = z->skip;
         }
     }
-#line 525 "rcksum/rcksum.ae"
+#line 557 "rcksum/rcksum.ae"
 (z->skip = 0);
 if (x != 0) {
         {
-#line 528 "rcksum/rcksum.ae"
+#line 560 "rcksum/rcksum.ae"
 (z->r0 = checksums_rsum_as_ptr(checksums_calc_rsum_block(data, data_len, x, z->block_size)));
 if (z->seq_matches > 1) {
                 {
-#line 530 "rcksum/rcksum.ae"
+#line 562 "rcksum/rcksum.ae"
 (z->r1 = checksums_rsum_as_ptr(checksums_calc_rsum_block(data, data_len, (x + z->block_size), z->block_size)));
                 }
             }
@@ -2437,11 +2545,11 @@ if (z->seq_matches > 1) {
     } else {
 if (offset == 0) {
             {
-#line 533 "rcksum/rcksum.ae"
+#line 565 "rcksum/rcksum.ae"
 (z->r0 = checksums_rsum_as_ptr(checksums_calc_rsum_block(data, data_len, x, z->block_size)));
 if (z->seq_matches > 1) {
                     {
-#line 535 "rcksum/rcksum.ae"
+#line 567 "rcksum/rcksum.ae"
 (z->r1 = checksums_rsum_as_ptr(checksums_calc_rsum_block(data, data_len, (x + z->block_size), z->block_size)));
                     }
                 }
@@ -2456,23 +2564,23 @@ if (z->seq_matches > 1) {
     int new1;
 while (x < x_limit) {
         {
-#line 540 "rcksum/rcksum.ae"
+#line 572 "rcksum/rcksum.ae"
 blocks_matched = 0;
 while (blocks_matched == 0) {
                 {
 if (x >= x_limit) {
                         {
-#line 543 "rcksum/rcksum.ae"
+#line 575 "rcksum/rcksum.ae"
                             break;
                         }
                     }
-#line 545 "rcksum/rcksum.ae"
+#line 577 "rcksum/rcksum.ae"
 thismatch = rcksum_match_block(z, data, data_len, x);
 if (thismatch > 0) {
                         {
-#line 547 "rcksum/rcksum.ae"
+#line 579 "rcksum/rcksum.ae"
 blocks_matched = z->seq_matches;
-#line 548 "rcksum/rcksum.ae"
+#line 580 "rcksum/rcksum.ae"
 got = (got + thismatch);
                         }
                     }
@@ -2480,25 +2588,25 @@ if (blocks_matched == 0) {
                         {
 if ((x + (z->block_size * z->seq_matches)) < data_len) {
                                 {
-#line 552 "rcksum/rcksum.ae"
+#line 584 "rcksum/rcksum.ae"
 old_c = (string_char_at_n(data, data_len, x) & 0xff);
-#line 553 "rcksum/rcksum.ae"
+#line 585 "rcksum/rcksum.ae"
 new_c = (string_char_at_n(data, data_len, (x + z->block_size)) & 0xff);
-#line 554 "rcksum/rcksum.ae"
+#line 586 "rcksum/rcksum.ae"
 checksums_update_rsum(z->r0, old_c, new_c, z->block_shift);
 if (z->seq_matches > 1) {
                                         {
-#line 556 "rcksum/rcksum.ae"
+#line 588 "rcksum/rcksum.ae"
 old1 = (string_char_at_n(data, data_len, (x + z->block_size)) & 0xff);
-#line 557 "rcksum/rcksum.ae"
+#line 589 "rcksum/rcksum.ae"
 new1 = (string_char_at_n(data, data_len, (x + (2 * z->block_size))) & 0xff);
-#line 558 "rcksum/rcksum.ae"
+#line 590 "rcksum/rcksum.ae"
 checksums_update_rsum(z->r1, old1, new1, z->block_shift);
                                         }
                                     }
                                 }
                             }
-#line 561 "rcksum/rcksum.ae"
+#line 593 "rcksum/rcksum.ae"
 x = (x + 1);
                         }
                     }
@@ -2506,7 +2614,7 @@ x = (x + 1);
             }
 if (blocks_matched > 0) {
                 {
-#line 566 "rcksum/rcksum.ae"
+#line 598 "rcksum/rcksum.ae"
 x = (x + (z->block_size * blocks_matched));
 if (x <= x_limit) {
                         {
@@ -2514,13 +2622,13 @@ if (z->seq_matches > 1) {
                                 {
 if (blocks_matched == 1) {
                                         {
-#line 570 "rcksum/rcksum.ae"
+#line 602 "rcksum/rcksum.ae"
 (z->r0 = z->r1);
                                         }
                                     } else {
 if ((x + z->block_size) <= data_len) {
                                             {
-#line 572 "rcksum/rcksum.ae"
+#line 604 "rcksum/rcksum.ae"
 (z->r0 = checksums_rsum_as_ptr(checksums_calc_rsum_block(data, data_len, x, z->block_size)));
                                             }
                                         }
@@ -2529,7 +2637,7 @@ if ((x + z->block_size) <= data_len) {
                             } else {
 if ((x + z->block_size) <= data_len) {
                                     {
-#line 575 "rcksum/rcksum.ae"
+#line 607 "rcksum/rcksum.ae"
 (z->r0 = checksums_rsum_as_ptr(checksums_calc_rsum_block(data, data_len, x, z->block_size)));
                                     }
                                 }
@@ -2538,7 +2646,7 @@ if (z->seq_matches > 1) {
                                 {
 if ((x + (2 * z->block_size)) <= data_len) {
                                         {
-#line 579 "rcksum/rcksum.ae"
+#line 611 "rcksum/rcksum.ae"
 (z->r1 = checksums_rsum_as_ptr(checksums_calc_rsum_block(data, data_len, (x + z->block_size), z->block_size)));
                                         }
                                     }
@@ -2550,13 +2658,13 @@ if ((x + (2 * z->block_size)) <= data_len) {
             }
         }
     }
-#line 586 "rcksum/rcksum.ae"
+#line 618 "rcksum/rcksum.ae"
 (z->skip = (x - x_limit));
-#line 587 "rcksum/rcksum.ae"
+#line 619 "rcksum/rcksum.ae"
     return got;
 }
 
-#line 597 "rcksum/rcksum.ae"
+#line 629 "rcksum/rcksum.ae"
 static int rcksum_submit_source_buffer(RcksumState* z, const char* data, int data_len) {
     int _heap_padded = 0; (void)_heap_padded;
     const char* padded = NULL;
@@ -2564,37 +2672,37 @@ static int rcksum_submit_source_buffer(RcksumState* z, const char* data, int dat
     const char* zeros = NULL;
 if (z->rsum_hash == NULL) {
         {
-#line 599 "rcksum/rcksum.ae"
+#line 631 "rcksum/rcksum.ae"
 rcksum_build_hash(z);
         }
     }
-#line 601 "rcksum/rcksum.ae"
+#line 633 "rcksum/rcksum.ae"
 int buf_size = (z->block_size * 16);
-#line 605 "rcksum/rcksum.ae"
+#line 637 "rcksum/rcksum.ae"
 int eff = data_len;
 if (data_len < buf_size) {
         {
-#line 607 "rcksum/rcksum.ae"
+#line 639 "rcksum/rcksum.ae"
 eff = (data_len + z->context);
 if (eff > buf_size) {
                 {
-#line 609 "rcksum/rcksum.ae"
+#line 641 "rcksum/rcksum.ae"
 eff = buf_size;
                 }
             }
         }
     }
-#line 613 "rcksum/rcksum.ae"
+#line 645 "rcksum/rcksum.ae"
 { const char* _tmp_old = padded; padded = data; if (_heap_padded) aether_heap_str_free(_tmp_old); _heap_padded = 0; }
 if (eff > data_len) {
         {
-#line 615 "rcksum/rcksum.ae"
+#line 647 "rcksum/rcksum.ae"
 { const char* _tmp_old = zeros; zeros = rcksum_make_zeros((eff - data_len)); if (_heap_zeros) aether_heap_str_free(_tmp_old); _heap_zeros = 1; }
-#line 616 "rcksum/rcksum.ae"
+#line 648 "rcksum/rcksum.ae"
 { const char* _tmp_old = padded; padded = rcksum_append_bytes(data, data_len, zeros, (eff - data_len)); if (_heap_padded) aether_heap_str_free(_tmp_old); _heap_padded = 1; }
         }
     }
-#line 618 "rcksum/rcksum.ae"
+#line 650 "rcksum/rcksum.ae"
     int _builder_ret = rcksum_submit_source_data(z, padded, eff, 0);
     /* deferred */ if (_heap_zeros) { aether_heap_str_free(zeros); zeros = NULL; _heap_zeros = 0; }
     /* deferred */ if (_heap_padded) { aether_heap_str_free(padded); padded = NULL; _heap_padded = 0; }
@@ -2603,183 +2711,228 @@ if (eff > data_len) {
     /* deferred */ if (_heap_padded) { aether_heap_str_free(padded); padded = NULL; _heap_padded = 0; }
 }
 
-#line 622 "rcksum/rcksum.ae"
+#line 654 "rcksum/rcksum.ae"
 static const char* rcksum_make_zeros(int n) {
-#line 623 "rcksum/rcksum.ae"
+#line 655 "rcksum/rcksum.ae"
     return aether_uniform_heap_str((const char*)(fileio_buf_alloc_str(n)), 1);
 }
 
-#line 628 "rcksum/rcksum.ae"
+#line 660 "rcksum/rcksum.ae"
 static const char* rcksum_append_bytes(const char* a, int a_len, const char* b, int b_len) {
-#line 629 "rcksum/rcksum.ae"
+#line 661 "rcksum/rcksum.ae"
 int total = (a_len + b_len);
-#line 630 "rcksum/rcksum.ae"
+#line 662 "rcksum/rcksum.ae"
 void* out = fileio_buf_alloc(total);
-#line 631 "rcksum/rcksum.ae"
+#line 663 "rcksum/rcksum.ae"
 int i = 0;
 while (i < a_len) {
         {
-#line 633 "rcksum/rcksum.ae"
+#line 665 "rcksum/rcksum.ae"
 fileio_buf_set(out, i, (string_char_at_n(a, a_len, i) & 0xff));
-#line 634 "rcksum/rcksum.ae"
+#line 666 "rcksum/rcksum.ae"
 i = (i + 1);
         }
     }
-#line 636 "rcksum/rcksum.ae"
+#line 668 "rcksum/rcksum.ae"
 int j = 0;
 while (j < b_len) {
         {
-#line 638 "rcksum/rcksum.ae"
+#line 670 "rcksum/rcksum.ae"
 fileio_buf_set(out, (a_len + j), (string_char_at_n(b, b_len, j) & 0xff));
-#line 639 "rcksum/rcksum.ae"
+#line 671 "rcksum/rcksum.ae"
 j = (j + 1);
         }
     }
-#line 641 "rcksum/rcksum.ae"
+#line 673 "rcksum/rcksum.ae"
     return aether_uniform_heap_str((const char*)(fileio_buf_to_str(out, total)), 1);
 }
 
-#line 645 "rcksum/rcksum.ae"
+#line 677 "rcksum/rcksum.ae"
 static _tuple_string_int rcksum_read_known_data(RcksumState* z, int len, int offset) {
 if (z->fd < 0) {
         {
-#line 647 "rcksum/rcksum.ae"
+#line 679 "rcksum/rcksum.ae"
             return (_tuple_string_int){aether_uniform_heap_str((const char*)(""), 0), 0};
         }
     }
-#line 649 "rcksum/rcksum.ae"
+#line 681 "rcksum/rcksum.ae"
     return fileio_read_at(z->fd, len, offset);
 }
 
-#line 23 "rcksum/fileio.ae"
+#line 29 "rcksum/fileio.ae"
 static int fileio_open_rw(const char* path) {
-#line 24 "rcksum/fileio.ae"
+#line 30 "rcksum/fileio.ae"
     return zsync_io_open_rw_trunc(aether_string_data(path));
 }
 
-#line 36 "rcksum/fileio.ae"
+#line 42 "rcksum/fileio.ae"
 static int fileio_write_at(int fd, const char* data, int len, int offset) {
-#line 37 "rcksum/fileio.ae"
+#line 43 "rcksum/fileio.ae"
 int64_t written = zsync_io_pwrite(fd, aether_string_data(data), len, offset);
-#line 38 "rcksum/fileio.ae"
+#line 44 "rcksum/fileio.ae"
     return written;
 }
 
-#line 44 "rcksum/fileio.ae"
+#line 50 "rcksum/fileio.ae"
 static _tuple_string_int fileio_read_at(int fd, int len, int offset) {
     int _heap_buf = 0; (void)_heap_buf;
     const char* buf = NULL;
     int _heap_s = 0; (void)_heap_s;
     const char* s = NULL;
-#line 45 "rcksum/fileio.ae"
+#line 51 "rcksum/fileio.ae"
 { const char* _tmp_old = buf; buf = zsync_io_pread_alloc(fd, len, offset); if (_heap_buf) aether_heap_str_free(_tmp_old); _heap_buf = 0; }
-#line 46 "rcksum/fileio.ae"
+#line 52 "rcksum/fileio.ae"
 int64_t n = zsync_io_last_read_len();
 if (n < 0) {
         {
-#line 48 "rcksum/fileio.ae"
+#line 54 "rcksum/fileio.ae"
             _tuple_string_int _builder_ret = (_tuple_string_int){aether_uniform_heap_str((const char*)(""), 0), (-(1))};
             /* deferred */ if (_heap_buf) { aether_heap_str_free(buf); buf = NULL; _heap_buf = 0; }
             return _builder_ret;
         }
     }
-#line 52 "rcksum/fileio.ae"
+#line 58 "rcksum/fileio.ae"
 { const char* _tmp_old = s; s = string_new_with_length(buf, n); if (_heap_s) aether_heap_str_free(_tmp_old); _heap_s = 1; }
-#line 53 "rcksum/fileio.ae"
+#line 59 "rcksum/fileio.ae"
     _tuple_string_int _builder_ret = (_tuple_string_int){aether_uniform_heap_str((const char*)(s), _heap_s), n};
     /* deferred */ if (_heap_buf) { aether_heap_str_free(buf); buf = NULL; _heap_buf = 0; }
     return _builder_ret;
     /* deferred */ if (_heap_buf) { aether_heap_str_free(buf); buf = NULL; _heap_buf = 0; }
 }
 
-#line 56 "rcksum/fileio.ae"
+#line 62 "rcksum/fileio.ae"
 static int fileio_truncate_to(int fd, int length) {
-#line 57 "rcksum/fileio.ae"
+#line 63 "rcksum/fileio.ae"
     return zsync_io_ftruncate(fd, length);
 }
 
-#line 60 "rcksum/fileio.ae"
+#line 66 "rcksum/fileio.ae"
 static int fileio_close_fd(int fd) {
-#line 61 "rcksum/fileio.ae"
+#line 67 "rcksum/fileio.ae"
     return zsync_io_close(fd);
 }
 
-#line 64 "rcksum/fileio.ae"
+#line 70 "rcksum/fileio.ae"
 static int fileio_sync_fd(int fd) {
-#line 65 "rcksum/fileio.ae"
+#line 71 "rcksum/fileio.ae"
     return zsync_io_fsync(fd);
 }
 
-#line 79 "rcksum/fileio.ae"
+#line 85 "rcksum/fileio.ae"
 static void* fileio_buf_alloc(int n) {
-#line 80 "rcksum/fileio.ae"
+#line 86 "rcksum/fileio.ae"
     return zsync_buf_alloc(n);
 }
 
-#line 85 "rcksum/fileio.ae"
+#line 91 "rcksum/fileio.ae"
 static const char* fileio_buf_alloc_str(int n) {
-#line 86 "rcksum/fileio.ae"
+#line 92 "rcksum/fileio.ae"
     return aether_uniform_heap_str((const char*)(string_new_with_length(zsync_buf_alloc_str(n), n)), 1);
 }
 
-#line 89 "rcksum/fileio.ae"
+#line 95 "rcksum/fileio.ae"
 static int fileio_buf_get(void* b, int i) {
-#line 90 "rcksum/fileio.ae"
+#line 96 "rcksum/fileio.ae"
     return zsync_buf_get(b, i);
 }
 
-#line 93 "rcksum/fileio.ae"
+#line 99 "rcksum/fileio.ae"
 static void fileio_buf_set(void* b, int i, int v) {
-#line 94 "rcksum/fileio.ae"
+#line 100 "rcksum/fileio.ae"
 zsync_buf_set(b, i, v);
 }
 
-#line 97 "rcksum/fileio.ae"
+#line 103 "rcksum/fileio.ae"
 static void fileio_buf_or(void* b, int i, int v) {
-#line 98 "rcksum/fileio.ae"
+#line 104 "rcksum/fileio.ae"
 zsync_buf_or(b, i, v);
 }
 
-#line 108 "rcksum/fileio.ae"
+#line 114 "rcksum/fileio.ae"
 static const char* fileio_buf_to_str(void* b, int n) {
     int _heap_s = 0; (void)_heap_s;
     const char* s = NULL;
-#line 109 "rcksum/fileio.ae"
+#line 115 "rcksum/fileio.ae"
 s = string_new_with_length(fileio_buf_as_string(b), n);
-#line 113 "rcksum/fileio.ae"
+#line 119 "rcksum/fileio.ae"
 string_retain(s);
-#line 114 "rcksum/fileio.ae"
+#line 120 "rcksum/fileio.ae"
     const char* _no_defer_ret = aether_uniform_heap_str((const char*)(s), _heap_s);
     return _no_defer_ret;
 }
 
-#line 121 "rcksum/fileio.ae"
-static const char* fileio_slice(const char* src, int src_len, int start, int len) {
-#line 122 "rcksum/fileio.ae"
-void* out = zsync_buf_alloc(len);
-#line 123 "rcksum/fileio.ae"
-int i = 0;
-while (i < len) {
-        {
 #line 125 "rcksum/fileio.ae"
-zsync_buf_set(out, i, (string_char_at_n(src, src_len, (start + i)) & 0xff));
+static const char* fileio_zero_prefix(const char* src, int src_len, int prefix) {
 #line 126 "rcksum/fileio.ae"
+void* out = zsync_buf_alloc(src_len);
+#line 127 "rcksum/fileio.ae"
+int i = 0;
+while (i < src_len) {
+        {
+if (i < prefix) {
+                {
+#line 130 "rcksum/fileio.ae"
+zsync_buf_set(out, i, 0);
+                }
+            } else {
+                {
+#line 132 "rcksum/fileio.ae"
+zsync_buf_set(out, i, (string_char_at_n(src, src_len, i) & 0xff));
+                }
+            }
+#line 134 "rcksum/fileio.ae"
 i = (i + 1);
         }
     }
-#line 128 "rcksum/fileio.ae"
+#line 136 "rcksum/fileio.ae"
+    return aether_uniform_heap_str((const char*)(string_new_with_length(fileio_buf_as_string(out), src_len)), 1);
+}
+
+#line 141 "rcksum/fileio.ae"
+static const char* fileio_pad_block(const char* src, int src_len, int start, int rem, int blocksize) {
+#line 142 "rcksum/fileio.ae"
+void* out = zsync_buf_alloc(blocksize);
+#line 143 "rcksum/fileio.ae"
+int i = 0;
+while (i < rem) {
+        {
+#line 145 "rcksum/fileio.ae"
+zsync_buf_set(out, i, (string_char_at_n(src, src_len, (start + i)) & 0xff));
+#line 146 "rcksum/fileio.ae"
+i = (i + 1);
+        }
+    }
+#line 148 "rcksum/fileio.ae"
+    return aether_uniform_heap_str((const char*)(string_new_with_length(fileio_buf_as_string(out), blocksize)), 1);
+}
+
+#line 155 "rcksum/fileio.ae"
+static const char* fileio_slice(const char* src, int src_len, int start, int len) {
+#line 156 "rcksum/fileio.ae"
+void* out = zsync_buf_alloc(len);
+#line 157 "rcksum/fileio.ae"
+int i = 0;
+while (i < len) {
+        {
+#line 159 "rcksum/fileio.ae"
+zsync_buf_set(out, i, (string_char_at_n(src, src_len, (start + i)) & 0xff));
+#line 160 "rcksum/fileio.ae"
+i = (i + 1);
+        }
+    }
+#line 162 "rcksum/fileio.ae"
     return aether_uniform_heap_str((const char*)(string_new_with_length(fileio_buf_as_string(out), len)), 1);
 }
 
-#line 133 "rcksum/fileio.ae"
+#line 167 "rcksum/fileio.ae"
 static const char* fileio_buf_as_string(void* b) {
-#line 134 "rcksum/fileio.ae"
+#line 168 "rcksum/fileio.ae"
     return zsync_buf_identity(b);
 }
 
-#line 148 "rcksum/fileio.ae"
+#line 195 "rcksum/fileio.ae"
 static const char* fileio_dup16(void* b) {
-#line 149 "rcksum/fileio.ae"
+#line 196 "rcksum/fileio.ae"
     return zsync_dup16(b);
 }
 
@@ -3289,6 +3442,12 @@ if (r >= n) {
 static int ranges_list_len(void* l) {
 #line 212 "rcksum/ranges.ae"
     return list_size(l);
+}
+
+#line 216 "rcksum/ranges.ae"
+static BlockPair* ranges_list_pair(void* l, int i) {
+#line 217 "rcksum/ranges.ae"
+    return ((BlockPair*)(list_get_raw(l, i)));
 }
 
 #line 223 "rcksum/ranges.ae"

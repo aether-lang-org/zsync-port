@@ -8,37 +8,72 @@
 import std.string (*)
 import std.fs
 import std.http.client
+import std.cryptography
 import zsync.control
 import zsync.download
 import rcksum.fileio
 
-// Fetch a URL's full body. Returns (body, length, err). Binary-safe.
-http_get(url: string) -> (string, int, string) {
+// Build an HTTP Basic "Authorization" header value from "user:pass",
+// or "" if creds is "". Returns e.g. "Basic dXNlcjpwYXNz".
+basic_auth(creds: string) -> string {
+    if string_equals(creds, "") == 1 {
+        return ""
+    }
+    enc, e = cryptography.base64_encode_padded(creds, string_length(creds))
+    if e != "" {
+        return ""
+    }
+    return string_concat("Basic ", enc)
+}
+
+// Fetch a URL's full body, optionally with an Authorization header and
+// an If-Modified-Since value. Returns (body, length, status, err) —
+// status is exposed so callers can detect 304 Not Modified.
+http_get_auth(url: string, auth: string, ims: string) -> (string, int, int, string) {
     req = client.request("GET", url)
     client.set_header(req, "User-Agent", "zsync-aether/0.7.1")
+    if string_equals(auth, "") == 0 {
+        client.set_header(req, "Authorization", auth)
+    }
+    if string_equals(ims, "") == 0 {
+        client.set_header(req, "If-Modified-Since", ims)
+    }
     resp, err = client.send_request(req)
     client.request_free(req)
     if err != "" {
-        return "", 0, err
+        return "", 0, 0, err
     }
     status = client.response_status(resp)
+    if status == 304 {
+        client.response_free(resp)
+        return "", 0, 304, ""
+    }
     if status != 200 {
         client.response_free(resp)
-        return "", 0, concat3("http status ", int_str(status), "")
+        return "", 0, status, concat3("http status ", int_str(status), "")
     }
     n = client.response_body_length(resp)
     body = client.response_body(resp)
     owned = copy_bytes(body, n)
     client.response_free(resp)
-    return owned, n, ""
+    return owned, n, 200, ""
 }
 
-// Fetch a byte range [start, fin] of a URL via a Range request.
-// Expects 206 Partial Content. Returns (body, length, err).
-http_get_range(url: string, start: int, fin: int) -> (string, int, string) {
+// Fetch a URL's full body (no auth). Returns (body, length, err).
+http_get(url: string) -> (string, int, string) {
+    body, n, status, err = http_get_auth(url, "", "")
+    return body, n, err
+}
+
+// Fetch a byte range [start, fin] of a URL via a Range request, with
+// optional auth. Expects 206 Partial Content. Returns (body, length, err).
+http_get_range_auth(url: string, start: int, fin: int, auth: string) -> (string, int, string) {
     req = client.request("GET", url)
     client.set_header(req, "User-Agent", "zsync-aether/0.7.1")
     client.set_header(req, "Range", range_header(start, fin))
+    if string_equals(auth, "") == 0 {
+        client.set_header(req, "Authorization", auth)
+    }
     resp, err = client.send_request(req)
     client.request_free(req)
     if err != "" {
@@ -54,6 +89,10 @@ http_get_range(url: string, start: int, fin: int) -> (string, int, string) {
     owned = copy_bytes(body, n)
     client.response_free(resp)
     return owned, n, ""
+}
+
+http_get_range(url: string, start: int, fin: int) -> (string, int, string) {
+    return http_get_range_auth(url, start, fin, "")
 }
 
 // "bytes=START-FIN"
@@ -82,9 +121,10 @@ fetch_control(source: string) -> (string, int, string) {
     return http_get(source)
 }
 
-// Fetch all the missing byte ranges of the download from `url` and feed
-// them into the State. Returns "" on success, error string otherwise.
-fetch_remaining(st: ptr, url: string) -> string {
+// Fetch all the missing byte ranges of the download from `url` (with
+// optional auth) and feed them into the State. Returns "" on success,
+// error string otherwise.
+fetch_remaining(st: ptr, url: string, auth: string) -> string {
     while download.status(st) < 2 {
         needed = download.needed_byte_ranges(st)
         nn = download.br_count(needed)
@@ -95,7 +135,7 @@ fetch_remaining(st: ptr, url: string) -> string {
         while i < nn {
             rstart = download.br_at_start(needed, i)
             rfin = download.br_at_fin(needed, i)
-            chunk, clen, e = http_get_range(url, rstart, rfin)
+            chunk, clen, e = http_get_range_auth(url, rstart, rfin, auth)
             if e != "" {
                 return e
             }

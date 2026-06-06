@@ -189,8 +189,6 @@ void aether_args_init(int argc, char** argv);
 typedef struct { const char* _0; int _1; const char* _2; } _tuple_string_int_string;
 typedef struct { int _0; int _1; const char* _2; } _tuple_int_int_string;
 typedef struct { int _0; const char* _1; } _tuple_int_string;
-typedef struct { int _0; int _1; int _2; } _tuple_int_int_int;
-typedef struct { const char* _0; int _1; } _tuple_string_int;
 
 typedef struct Ctx Ctx;
 typedef struct LocalTime LocalTime;
@@ -214,34 +212,11 @@ typedef struct LocalTime {
     int tz_offset_minutes;
 } LocalTime;
 
-#define fs_KIND_OK (0)
-#define fs_KIND_NOT_FOUND (1)
-#define fs_KIND_PERMISSION_DENIED (2)
-#define fs_KIND_EXISTS (3)
-#define fs_KIND_CROSS_DEVICE (4)
-#define fs_KIND_IO (5)
-#define fs_KIND_INVALID (6)
-#define fs_KIND_LOOP (7)
-#define fs_KIND_NAME_TOO_LONG (8)
-#define fs_KIND_NO_SPACE (9)
-#define fs_KIND_IS_DIR (10)
-#define fs_KIND_NOT_DIR (11)
-#define fs_KIND_UNAVAILABLE (99)
 // Forward declarations
 void* ctx_as_ptr(Ctx*);
 void serve_handler(void*, void*, void*);
-_tuple_int_int_int parse_range(const char*, int);
-const char* content_range(int, int, int);
-int is_blank(const char*);
 int parse_num(const char*);
-static void http_server_on_start(void*, void*, void*);
 static const char* http_server_start(void*);
-static _tuple_int_string fs_size(const char*);
-static int fs_exists(const char*);
-static int fileio_open_ro(const char*);
-static _tuple_string_int fileio_read_at(int, int, int);
-static int fileio_close_fd(int);
-static int fileio_sync_fd(int);
 
 // Extern C function: string_new
 void* string_new(const char*);
@@ -666,6 +641,21 @@ const char* http_request_body(void*);
 // Extern C function: http_request_body_length
 int http_request_body_length(void*);
 
+// Extern C function: http_request_body_read_raw
+int http_request_body_read_raw(void*, int, int);
+
+// Extern C function: http_get_request_body_read
+const char* http_get_request_body_read(void);
+
+// Extern C function: http_get_request_body_read_length
+int http_get_request_body_read_length(void);
+
+// Extern C function: http_release_request_body_read
+void http_release_request_body_read(void);
+
+// Extern C function: string_new_with_length
+void* string_new_with_length(const char*, int);
+
 // Extern C function: http_request_query
 const char* http_request_query(void*);
 
@@ -785,561 +775,51 @@ int64_t os_now_monotonic_ns_raw(void);
 // Extern C function: os_now_unix_ms_raw
 int64_t os_now_unix_ms_raw(void);
 
-// Extern C function: file_open_raw
-void* file_open_raw(const char*, const char*);
-
-// Extern C function: file_close
-int file_close(void*);
-
-// Extern C function: file_read_all_raw
-const char* file_read_all_raw(void*);
-
-// Extern C function: file_write_raw
-int file_write_raw(void*, const char*, int);
-
-// Extern C function: file_exists
-int file_exists(const char*);
-
-// Extern C function: fs_path_exists
-int fs_path_exists(const char*);
-
-// Extern C function: file_delete_raw
-int file_delete_raw(const char*);
-
-// Extern C function: file_size_raw
-int file_size_raw(const char*);
-
-// Extern C function: file_mtime
-int file_mtime(const char*);
-
-// Extern C function: file_mtime_raw
-int file_mtime_raw(const char*);
-
-// Extern C function: dir_exists
-int dir_exists(const char*);
-
-// Extern C function: dir_create_raw
-int dir_create_raw(const char*);
-
-// Extern C function: dir_create_mode_raw
-int dir_create_mode_raw(const char*, int);
-
-// Extern C function: dir_delete_raw
-int dir_delete_raw(const char*);
-
-// Extern C function: dir_list_raw
-void* dir_list_raw(const char*);
-
-// Extern C function: fs_mkdir_p_raw
-int fs_mkdir_p_raw(const char*);
-
-// Extern C function: fs_symlink_raw
-int fs_symlink_raw(const char*, const char*);
-
-// Extern C function: fs_readlink_raw
-const char* fs_readlink_raw(const char*);
-
-// Extern C function: fs_is_symlink
-int fs_is_symlink(const char*);
-
-// Extern C function: fs_unlink_raw
-int fs_unlink_raw(const char*);
-
-// Extern C function: fs_write_binary_raw
-int fs_write_binary_raw(const char*, const char*, int);
-
-// Extern C function: fs_write_atomic_raw
-int fs_write_atomic_raw(const char*, const char*, int);
-
-// Extern C function: fs_rename_raw
-int fs_rename_raw(const char*, const char*);
-
-// Extern C function: fs_try_stat
-int fs_try_stat(const char*);
-
-// Extern C function: fs_get_stat_kind
-int fs_get_stat_kind(void);
-
-// Extern C function: fs_get_stat_size
-int fs_get_stat_size(void);
-
-// Extern C function: fs_get_stat_mtime
-int fs_get_stat_mtime(void);
-
-// Extern C function: fs_try_read_binary
-int fs_try_read_binary(const char*);
-
-// Extern C function: fs_get_read_binary
-const char* fs_get_read_binary(void);
-
-// Extern C function: fs_get_read_binary_length
-int fs_get_read_binary_length(void);
-
-// Extern C function: fs_release_read_binary
-void fs_release_read_binary(void);
-
-// Extern C function: fs_read_binary_tuple
-_tuple_string_int_string fs_read_binary_tuple(const char*);
-
-// Extern C function: fs_copy_raw
-_tuple_int_int_string fs_copy_raw(const char*, const char*);
-
-// Extern C function: fs_move_raw
-_tuple_int_int_string fs_move_raw(const char*, const char*);
-
-// Extern C function: fs_realpath_raw
-_tuple_string_int_string fs_realpath_raw(const char*);
-
-// Extern C function: fs_chmod_raw
-_tuple_int_int_string fs_chmod_raw(const char*, int);
-
-// Extern C function: dir_list_count
-int dir_list_count(void*);
-
-// Extern C function: dir_list_get
-const char* dir_list_get(void*, int);
-
-// Extern C function: dir_list_free
-void dir_list_free(void*);
-
-// Extern C function: path_join
-const char* path_join(const char*, const char*);
-
-// Extern C function: path_dirname
-const char* path_dirname(const char*);
-
-// Extern C function: path_basename
-const char* path_basename(const char*);
-
-// Extern C function: path_extension
-const char* path_extension(const char*);
-
-// Extern C function: path_is_absolute
-int path_is_absolute(const char*);
-
-// Extern C function: fs_glob_raw
-void* fs_glob_raw(const char*);
-
-// Extern C function: fs_glob_multi_raw
-void* fs_glob_multi_raw(void*);
-
-// Extern C function: string_concat
-const char* string_concat(const char*, const char*);
-
-// Extern C function: string_length
-int string_length(const char*);
-
-// Extern C function: string_new_with_length
-void* string_new_with_length(const char*, int);
-
-// Extern C function: malloc (libc-provided, declaration skipped)
-// Extern C function: zsync_io_open_rw_trunc
-int zsync_io_open_rw_trunc(const char*);
-
-// Extern C function: zsync_io_open_ro
-int zsync_io_open_ro(const char*);
-
-// Extern C function: zsync_io_pwrite
-int64_t zsync_io_pwrite(int, const char*, int64_t, int64_t);
-
-// Extern C function: zsync_io_pread_alloc
-const char* zsync_io_pread_alloc(int, int64_t, int64_t);
-
-// Extern C function: zsync_io_last_read_len
-int64_t zsync_io_last_read_len(void);
-
-// Extern C function: zsync_io_ftruncate
-int zsync_io_ftruncate(int, int64_t);
-
-// Extern C function: zsync_io_close
-int zsync_io_close(int);
-
-// Extern C function: zsync_io_fsync
-int zsync_io_fsync(int);
-
-// Extern C function: zsync_buf_alloc
-void* zsync_buf_alloc(int64_t);
-
-// Extern C function: zsync_buf_alloc_str
-const char* zsync_buf_alloc_str(int64_t);
-
-// Extern C function: zsync_buf_get
-int zsync_buf_get(void*, int64_t);
-
-// Extern C function: zsync_buf_set
-void zsync_buf_set(void*, int64_t, int);
-
-// Extern C function: zsync_buf_or
-void zsync_buf_or(void*, int64_t, int);
-
-// Extern C function: zsync_buf_free
-void zsync_buf_free(void*);
-
-// Extern C function: zsync_buf_identity
-const char* zsync_buf_identity(void*);
-
-// Extern C function: zsync_dup16
-const char* zsync_dup16(void*);
-
 // Extern C function: malloc (libc-provided, declaration skipped)
 
 // Import: std.string
 // Import: std.http
 // Import: std.os
-// Import: std.fs
-// Import: rcksum.fileio
-#line 23 "cmd/fileserver.ae"
+#line 19 "cmd/fileserver.ae"
 void* ctx_as_ptr(Ctx* c) {
-#line 24 "cmd/fileserver.ae"
+#line 20 "cmd/fileserver.ae"
     return c;
 }
 
-#line 28 "cmd/fileserver.ae"
+#line 24 "cmd/fileserver.ae"
 void serve_handler(void* req, void* res, void* ud) {
-    int _heap_path = 0; (void)_heap_path;
-    const char* path = NULL;
-    int _heap_full = 0; (void)_heap_full;
-    const char* full = NULL;
-    int _heap_szerr = 0; (void)_heap_szerr;
-    const char* szerr = NULL;
-    int _heap_rangeval = 0; (void)_heap_rangeval;
-    const char* rangeval = NULL;
-    int _heap_body = 0; (void)_heap_body;
-    const char* body = NULL;
-#line 29 "cmd/fileserver.ae"
+#line 25 "cmd/fileserver.ae"
 Ctx* ctx = ((Ctx*)(ud));
-#line 30 "cmd/fileserver.ae"
-{ const char* _tmp_old = path; path = http_request_path(req); if (_heap_path) aether_heap_str_free(_tmp_old); _heap_path = 0; }
-#line 32 "cmd/fileserver.ae"
-{ const char* _tmp_old = full; full = string_concat(ctx->base, path); if (_heap_full) aether_heap_str_free(_tmp_old); _heap_full = 1; }
-if (fs_exists(full) == 0) {
-        {
-#line 35 "cmd/fileserver.ae"
-http_response_set_status(res, 404);
-#line 36 "cmd/fileserver.ae"
-http_response_set_body(res, aether_string_data("not found"));
-#line 37 "cmd/fileserver.ae"
-            /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
-            /* deferred */ if (_heap_rangeval) { aether_heap_str_free(rangeval); rangeval = NULL; _heap_rangeval = 0; }
-            /* deferred */ if (_heap_szerr) { aether_heap_str_free(szerr); szerr = NULL; _heap_szerr = 0; }
-            /* deferred */ if (_heap_full) { aether_heap_str_free(full); full = NULL; _heap_full = 0; }
-            /* deferred */ if (_heap_path) { aether_heap_str_free(path); path = NULL; _heap_path = 0; }
-            return;
-        }
-    }
-#line 40 "cmd/fileserver.ae"
-    _tuple_int_string _tup0 = fs_size(full);
-    int size = _tup0._0;
-    { const char* _tmp_old = szerr; szerr = _tup0._1; if (_heap_szerr) aether_heap_str_free(_tmp_old); _heap_szerr = 0; }
-#line 41 "cmd/fileserver.ae"
-int fd = fileio_open_ro(full);
-if (fd < 0) {
-        {
-#line 43 "cmd/fileserver.ae"
-http_response_set_status(res, 500);
-#line 44 "cmd/fileserver.ae"
-http_response_set_body(res, aether_string_data("open failed"));
-#line 45 "cmd/fileserver.ae"
-            /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
-            /* deferred */ if (_heap_rangeval) { aether_heap_str_free(rangeval); rangeval = NULL; _heap_rangeval = 0; }
-            /* deferred */ if (_heap_szerr) { aether_heap_str_free(szerr); szerr = NULL; _heap_szerr = 0; }
-            /* deferred */ if (_heap_full) { aether_heap_str_free(full); full = NULL; _heap_full = 0; }
-            /* deferred */ if (_heap_path) { aether_heap_str_free(path); path = NULL; _heap_path = 0; }
-            return;
-        }
-    }
-#line 48 "cmd/fileserver.ae"
-{ const char* _tmp_old = rangeval; rangeval = http_get_header(req, aether_string_data("Range")); if (_heap_rangeval) aether_heap_str_free(_tmp_old); _heap_rangeval = 0; }
-if (is_blank(rangeval) == 1) {
-        {
-#line 51 "cmd/fileserver.ae"
-            _tuple_string_int _tup1 = fileio_read_at(fd, size, 0);
-            { const char* _tmp_old = body; body = _tup1._0; if (_heap_body) aether_heap_str_free(_tmp_old); _heap_body = 1; }
-            int n = _tup1._1;
-#line 52 "cmd/fileserver.ae"
-http_response_set_status(res, 200);
-#line 53 "cmd/fileserver.ae"
-http_response_set_header(res, aether_string_data("Accept-Ranges"), aether_string_data("bytes"));
-#line 54 "cmd/fileserver.ae"
-http_response_set_body_n(res, aether_string_data(body), n);
-#line 55 "cmd/fileserver.ae"
-fileio_close_fd(fd);
-#line 56 "cmd/fileserver.ae"
-            /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
-            /* deferred */ if (_heap_rangeval) { aether_heap_str_free(rangeval); rangeval = NULL; _heap_rangeval = 0; }
-            /* deferred */ if (_heap_szerr) { aether_heap_str_free(szerr); szerr = NULL; _heap_szerr = 0; }
-            /* deferred */ if (_heap_full) { aether_heap_str_free(full); full = NULL; _heap_full = 0; }
-            /* deferred */ if (_heap_path) { aether_heap_str_free(path); path = NULL; _heap_path = 0; }
-            return;
-        }
-    }
-#line 60 "cmd/fileserver.ae"
-    _tuple_int_int_int _tup2 = parse_range(rangeval, size);
-    int start = _tup2._0;
-    int fin = _tup2._1;
-    int ok = _tup2._2;
-if (ok == 0) {
-        {
-#line 62 "cmd/fileserver.ae"
-http_response_set_status(res, 416);
-#line 63 "cmd/fileserver.ae"
-http_response_set_body(res, aether_string_data("bad range"));
-#line 64 "cmd/fileserver.ae"
-fileio_close_fd(fd);
-#line 65 "cmd/fileserver.ae"
-            /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
-            /* deferred */ if (_heap_rangeval) { aether_heap_str_free(rangeval); rangeval = NULL; _heap_rangeval = 0; }
-            /* deferred */ if (_heap_szerr) { aether_heap_str_free(szerr); szerr = NULL; _heap_szerr = 0; }
-            /* deferred */ if (_heap_full) { aether_heap_str_free(full); full = NULL; _heap_full = 0; }
-            /* deferred */ if (_heap_path) { aether_heap_str_free(path); path = NULL; _heap_path = 0; }
-            return;
-        }
-    }
-#line 67 "cmd/fileserver.ae"
-int len = ((fin - start) + 1);
-#line 68 "cmd/fileserver.ae"
-    _tuple_string_int _tup3 = fileio_read_at(fd, len, start);
-    { const char* _tmp_old = body; body = _tup3._0; if (_heap_body) aether_heap_str_free(_tmp_old); _heap_body = 1; }
-    int n = _tup3._1;
-#line 69 "cmd/fileserver.ae"
-http_response_set_status(res, 206);
-#line 70 "cmd/fileserver.ae"
-http_response_set_header(res, aether_string_data("Accept-Ranges"), aether_string_data("bytes"));
-#line 71 "cmd/fileserver.ae"
-http_response_set_header(res, aether_string_data("Content-Range"), aether_string_data(content_range(start, fin, size)));
-#line 72 "cmd/fileserver.ae"
-http_response_set_body_n(res, aether_string_data(body), n);
-#line 73 "cmd/fileserver.ae"
-fileio_close_fd(fd);
-    /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
-    /* deferred */ if (_heap_rangeval) { aether_heap_str_free(rangeval); rangeval = NULL; _heap_rangeval = 0; }
-    /* deferred */ if (_heap_szerr) { aether_heap_str_free(szerr); szerr = NULL; _heap_szerr = 0; }
-    /* deferred */ if (_heap_full) { aether_heap_str_free(full); full = NULL; _heap_full = 0; }
-    /* deferred */ if (_heap_path) { aether_heap_str_free(path); path = NULL; _heap_path = 0; }
+#line 28 "cmd/fileserver.ae"
+http_serve_static(req, res, aether_string_data(ctx->base));
 }
 
-#line 78 "cmd/fileserver.ae"
-_tuple_int_int_int parse_range(const char* h, int size) {
-    int _heap_body = 0; (void)_heap_body;
-    const char* body = NULL;
-    int _heap_start_s = 0; (void)_heap_start_s;
-    const char* start_s = NULL;
-    int _heap_fin_s = 0; (void)_heap_fin_s;
-    const char* fin_s = NULL;
-if (string_starts_with(h, "bytes=") == 0) {
-        {
-#line 81 "cmd/fileserver.ae"
-            _tuple_int_int_int _builder_ret = (_tuple_int_int_int){0, 0, 0};
-            /* deferred */ if (_heap_fin_s) { aether_heap_str_free(fin_s); fin_s = NULL; _heap_fin_s = 0; }
-            /* deferred */ if (_heap_start_s) { aether_heap_str_free(start_s); start_s = NULL; _heap_start_s = 0; }
-            /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
-            return _builder_ret;
-        }
-    }
-#line 83 "cmd/fileserver.ae"
-{ const char* _tmp_old = body; body = string_substring(h, 6, string_length(h)); if (_heap_body) aether_heap_str_free(_tmp_old); _heap_body = 1; }
-#line 84 "cmd/fileserver.ae"
-int dash = string_index_of(body, "-");
-if (dash < 0) {
-        {
-#line 86 "cmd/fileserver.ae"
-            _tuple_int_int_int _builder_ret = (_tuple_int_int_int){0, 0, 0};
-            /* deferred */ if (_heap_fin_s) { aether_heap_str_free(fin_s); fin_s = NULL; _heap_fin_s = 0; }
-            /* deferred */ if (_heap_start_s) { aether_heap_str_free(start_s); start_s = NULL; _heap_start_s = 0; }
-            /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
-            return _builder_ret;
-        }
-    }
-#line 88 "cmd/fileserver.ae"
-{ const char* _tmp_old = start_s; start_s = string_substring(body, 0, dash); if (_heap_start_s) aether_heap_str_free(_tmp_old); _heap_start_s = 1; }
-#line 89 "cmd/fileserver.ae"
-{ const char* _tmp_old = fin_s; fin_s = string_substring(body, (dash + 1), string_length(body)); if (_heap_fin_s) aether_heap_str_free(_tmp_old); _heap_fin_s = 1; }
-#line 90 "cmd/fileserver.ae"
-int start = parse_num(start_s);
-#line 91 "cmd/fileserver.ae"
-int fin = 0;
-if (string_equals(fin_s, "") == 1) {
-        {
-#line 93 "cmd/fileserver.ae"
-fin = (size - 1);
-        }
-    } else {
-        {
-#line 95 "cmd/fileserver.ae"
-fin = parse_num(fin_s);
-        }
-    }
-if (fin >= size) {
-        {
-#line 98 "cmd/fileserver.ae"
-fin = (size - 1);
-        }
-    }
-if (start < 0) {
-        {
-#line 101 "cmd/fileserver.ae"
-            _tuple_int_int_int _builder_ret = (_tuple_int_int_int){0, 0, 0};
-            /* deferred */ if (_heap_fin_s) { aether_heap_str_free(fin_s); fin_s = NULL; _heap_fin_s = 0; }
-            /* deferred */ if (_heap_start_s) { aether_heap_str_free(start_s); start_s = NULL; _heap_start_s = 0; }
-            /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
-            return _builder_ret;
-        }
-    }
-if (start > fin) {
-        {
-#line 104 "cmd/fileserver.ae"
-            _tuple_int_int_int _builder_ret = (_tuple_int_int_int){0, 0, 0};
-            /* deferred */ if (_heap_fin_s) { aether_heap_str_free(fin_s); fin_s = NULL; _heap_fin_s = 0; }
-            /* deferred */ if (_heap_start_s) { aether_heap_str_free(start_s); start_s = NULL; _heap_start_s = 0; }
-            /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
-            return _builder_ret;
-        }
-    }
-#line 106 "cmd/fileserver.ae"
-    _tuple_int_int_int _builder_ret = (_tuple_int_int_int){start, fin, 1};
-    /* deferred */ if (_heap_fin_s) { aether_heap_str_free(fin_s); fin_s = NULL; _heap_fin_s = 0; }
-    /* deferred */ if (_heap_start_s) { aether_heap_str_free(start_s); start_s = NULL; _heap_start_s = 0; }
-    /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
-    return _builder_ret;
-    /* deferred */ if (_heap_fin_s) { aether_heap_str_free(fin_s); fin_s = NULL; _heap_fin_s = 0; }
-    /* deferred */ if (_heap_start_s) { aether_heap_str_free(start_s); start_s = NULL; _heap_start_s = 0; }
-    /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
-}
-
-#line 109 "cmd/fileserver.ae"
-const char* content_range(int start, int fin, int size) {
-    int _heap_out = 0; (void)_heap_out;
-    const char* out = NULL;
-#line 110 "cmd/fileserver.ae"
-{ const char* _tmp_old = out; out = ({ const char* _ad_0 = (const char*)(string_from_int(start)); const char* _ad_r = string_concat("bytes ", _ad_0); aether_heap_str_free(_ad_0); _ad_r; }); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 1; }
-#line 111 "cmd/fileserver.ae"
-{ const char* _tmp_old = out; out = string_concat(out, "-"); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 1; }
-#line 112 "cmd/fileserver.ae"
-{ const char* _tmp_old = out; out = ({ const char* _ad_1 = (const char*)(string_from_int(fin)); const char* _ad_r = string_concat(out, _ad_1); aether_heap_str_free(_ad_1); _ad_r; }); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 1; }
-#line 113 "cmd/fileserver.ae"
-{ const char* _tmp_old = out; out = string_concat(out, "/"); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 1; }
-#line 114 "cmd/fileserver.ae"
-{ const char* _tmp_old = out; out = ({ const char* _ad_2 = (const char*)(string_from_int(size)); const char* _ad_r = string_concat(out, _ad_2); aether_heap_str_free(_ad_2); _ad_r; }); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 1; }
-#line 115 "cmd/fileserver.ae"
-    const char* _no_defer_ret = aether_uniform_heap_str((const char*)(out), _heap_out);
-    return _no_defer_ret;
-}
-
-#line 120 "cmd/fileserver.ae"
-int is_blank(const char* s) {
-if (strcmp(_aether_safe_str(s), _aether_safe_str(NULL)) == 0) {
-        {
-#line 122 "cmd/fileserver.ae"
-            return 1;
-        }
-    }
-if (string_equals(s, "") == 1) {
-        {
-#line 125 "cmd/fileserver.ae"
-            return 1;
-        }
-    }
-#line 127 "cmd/fileserver.ae"
-    return 0;
-}
-
-#line 130 "cmd/fileserver.ae"
+#line 31 "cmd/fileserver.ae"
 int parse_num(const char* s) {
-#line 131 "cmd/fileserver.ae"
+#line 32 "cmd/fileserver.ae"
 int ok = string_try_long(s);
 if (ok == 0) {
         {
-#line 132 "cmd/fileserver.ae"
+#line 33 "cmd/fileserver.ae"
             return 0;
         }
     }
-#line 133 "cmd/fileserver.ae"
+#line 34 "cmd/fileserver.ae"
     return string_get_long(s);
 }
 
-#line 372 "/home/paul/scm/aether/build/../std/http/module.ae"
-static void http_server_on_start(void* server, void* hook, void* user_data) {
-#line 373 "/home/paul/scm/aether/build/../std/http/module.ae"
-http_server_set_on_start(server, hook, user_data);
-}
-
-#line 531 "/home/paul/scm/aether/build/../std/http/module.ae"
+#line 534 "/home/paul/scm/aether/build/../std/http/module.ae"
 static const char* http_server_start(void* server) {
-#line 532 "/home/paul/scm/aether/build/../std/http/module.ae"
+#line 535 "/home/paul/scm/aether/build/../std/http/module.ae"
 int rc = http_server_start_raw(server);
 if (rc < 0) {
         {
-#line 534 "/home/paul/scm/aether/build/../std/http/module.ae"
+#line 537 "/home/paul/scm/aether/build/../std/http/module.ae"
             return "server start failed";
         }
     }
-#line 536 "/home/paul/scm/aether/build/../std/http/module.ae"
+#line 539 "/home/paul/scm/aether/build/../std/http/module.ae"
     return "";
-}
-
-#line 299 "/home/paul/scm/aether/build/../std/fs/module.ae"
-static _tuple_int_string fs_size(const char* path) {
-#line 300 "/home/paul/scm/aether/build/../std/fs/module.ae"
-int s = file_size_raw(aether_string_data(path));
-if (s < 0) {
-        {
-#line 302 "/home/paul/scm/aether/build/../std/fs/module.ae"
-            return (_tuple_int_string){0, "cannot stat file"};
-        }
-    }
-#line 304 "/home/paul/scm/aether/build/../std/fs/module.ae"
-    return (_tuple_int_string){s, ""};
-}
-
-#line 326 "/home/paul/scm/aether/build/../std/fs/module.ae"
-static int fs_exists(const char* path) {
-#line 327 "/home/paul/scm/aether/build/../std/fs/module.ae"
-    return fs_path_exists(aether_string_data(path));
-}
-
-#line 27 "rcksum/fileio.ae"
-static int fileio_open_ro(const char* path) {
-#line 28 "rcksum/fileio.ae"
-    return zsync_io_open_ro(aether_string_data(path));
-}
-
-#line 44 "rcksum/fileio.ae"
-static _tuple_string_int fileio_read_at(int fd, int len, int offset) {
-    int _heap_buf = 0; (void)_heap_buf;
-    const char* buf = NULL;
-    int _heap_s = 0; (void)_heap_s;
-    const char* s = NULL;
-#line 45 "rcksum/fileio.ae"
-{ const char* _tmp_old = buf; buf = zsync_io_pread_alloc(fd, len, offset); if (_heap_buf) aether_heap_str_free(_tmp_old); _heap_buf = 0; }
-#line 46 "rcksum/fileio.ae"
-int64_t n = zsync_io_last_read_len();
-if (n < 0) {
-        {
-#line 48 "rcksum/fileio.ae"
-            _tuple_string_int _builder_ret = (_tuple_string_int){aether_uniform_heap_str((const char*)(""), 0), (-(1))};
-            /* deferred */ if (_heap_buf) { aether_heap_str_free(buf); buf = NULL; _heap_buf = 0; }
-            return _builder_ret;
-        }
-    }
-#line 52 "rcksum/fileio.ae"
-{ const char* _tmp_old = s; s = string_new_with_length(buf, n); if (_heap_s) aether_heap_str_free(_tmp_old); _heap_s = 1; }
-#line 53 "rcksum/fileio.ae"
-    _tuple_string_int _builder_ret = (_tuple_string_int){aether_uniform_heap_str((const char*)(s), _heap_s), n};
-    /* deferred */ if (_heap_buf) { aether_heap_str_free(buf); buf = NULL; _heap_buf = 0; }
-    return _builder_ret;
-    /* deferred */ if (_heap_buf) { aether_heap_str_free(buf); buf = NULL; _heap_buf = 0; }
-}
-
-#line 60 "rcksum/fileio.ae"
-static int fileio_close_fd(int fd) {
-#line 61 "rcksum/fileio.ae"
-    return zsync_io_close(fd);
-}
-
-#line 64 "rcksum/fileio.ae"
-static int fileio_sync_fd(int fd) {
-#line 65 "rcksum/fileio.ae"
-    return zsync_io_fsync(fd);
 }
 
 int main(int argc, char** argv) {
@@ -1354,35 +834,35 @@ int main(int argc, char** argv) {
     int _heap_base = 0; (void)_heap_base;
     const char* base = NULL;
     {
-#line 137 "cmd/fileserver.ae"
+#line 38 "cmd/fileserver.ae"
 int argc = aether_args_count();
 if (argc < 3) {
             {
-#line 139 "cmd/fileserver.ae"
+#line 40 "cmd/fileserver.ae"
 puts("usage: fileserver <port> <base-dir>");
-#line 140 "cmd/fileserver.ae"
+#line 41 "cmd/fileserver.ae"
 exit(2);
             }
         }
-#line 142 "cmd/fileserver.ae"
+#line 43 "cmd/fileserver.ae"
 int port = parse_num(aether_args_get(1));
-#line 143 "cmd/fileserver.ae"
+#line 44 "cmd/fileserver.ae"
 base = aether_args_get(2);
-#line 145 "cmd/fileserver.ae"
+#line 46 "cmd/fileserver.ae"
 void* craw = malloc(16);
-#line 146 "cmd/fileserver.ae"
+#line 47 "cmd/fileserver.ae"
 Ctx* ctx = ((Ctx*)(craw));
-#line 147 "cmd/fileserver.ae"
+#line 48 "cmd/fileserver.ae"
 (ctx->base = base);
-#line 149 "cmd/fileserver.ae"
+#line 50 "cmd/fileserver.ae"
 void* server = http_server_create(port);
-#line 150 "cmd/fileserver.ae"
+#line 51 "cmd/fileserver.ae"
 http_server_set_host(server, aether_string_data("127.0.0.1"));
-#line 151 "cmd/fileserver.ae"
+#line 52 "cmd/fileserver.ae"
 http_server_get(server, aether_string_data("/*"), serve_handler, ctx_as_ptr(ctx));
-#line 152 "cmd/fileserver.ae"
+#line 53 "cmd/fileserver.ae"
 printf("fileserver on 127.0.0.1:%d serving %s", port, _aether_safe_str(base)); putchar('\n');
-#line 153 "cmd/fileserver.ae"
+#line 54 "cmd/fileserver.ae"
 http_server_start(server);
     }
     return 0;

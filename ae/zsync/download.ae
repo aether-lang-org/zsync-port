@@ -169,3 +169,19 @@ complete(s: *State) -> string {
 lower(s: string) -> string {
     return string_to_lower(s)
 }
+
+// Verbose stats line (mirrors Go's "hash stats: ...").
+stats_line(s: *State) -> string {
+    hh = rcksum.stat_hash_hit_p(s.rs)
+    wh = rcksum.stat_weak_hit_p(s.rs)
+    sh = rcksum.stat_strong_hit_p(s.rs)
+    ck = rcksum.stat_checksummed_p(s.rs)
+    out = string_concat("hash stats: hash hit ", string_from_int(hh))
+    out = string_concat(out, ", weak hit ")
+    out = string_concat(out, string_from_int(wh))
+    out = string_concat(out, ", checksums calculated ")
+    out = string_concat(out, string_from_int(ck))
+    out = string_concat(out, ", strong hit ")
+    out = string_concat(out, string_from_int(sh))
+    return out
+}

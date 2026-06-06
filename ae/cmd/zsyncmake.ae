@@ -7,15 +7,20 @@ import std.string (*)
 import std.os (*)
 import std.fs
 import cmd.mklib
+import rcksum.fileio
+
+VERSION() -> string {
+    return "0.7.1"
+}
 
 main() {
     argc = aether_args_count()
-    // crude flag parse: zsyncmake [-b N] [-o out] [-u url] [-f name] input
     blocksize = 0
     out = ""
     url = ""
     fname = ""
     input = ""
+    verbose = 0
     i = 1
     while i < argc {
         a = aether_args_get(i)
@@ -31,6 +36,17 @@ main() {
         } else if string_equals(a, "-f") == 1 {
             i = i + 1
             fname = aether_args_get(i)
+        } else if string_equals(a, "-v") == 1 {
+            verbose = 1
+        } else if string_equals(a, "-V") == 1 {
+            println("zsyncmake v${VERSION()}")
+            exit(0)
+        } else if string_equals(a, "-e") == 1 {
+            // no-op (compat)
+        } else if string_equals(a, "-z") == 1 {
+            // no-op (compat)
+        } else if string_equals(a, "-Z") == 1 {
+            // no-op (compat)
         } else {
             input = a
         }
@@ -38,7 +54,7 @@ main() {
     }
 
     if string_equals(input, "") == 1 {
-        println("usage: zsyncmake [-b N] [-o out] [-u url] [-f name] input")
+        println("usage: zsyncmake [-b N] [-o out] [-u url] [-f name] [-v] [-V] input")
         exit(2)
     }
 
@@ -62,11 +78,22 @@ main() {
         out = string_concat(fname, ".zsync")
     }
 
-    content, clen = mklib.generate_n(data, dlen, blocksize, fname, "", url)
+    // MTime header from the input file's mtime (RFC1123Z, UTC), matching
+    // the Go tool. Only emitted when we have a filename (same as Go).
+    mtime = ""
+    epoch, merr = fs.mtime(input)
+    if merr == "" {
+        mtime = fileio.rfc1123z(epoch)
+    }
+
+    content, clen = mklib.generate_n(data, dlen, blocksize, fname, mtime, url)
     werr = fs.write_binary(out, content, clen)
     if werr != "" {
         println("write: ${werr}")
         exit(2)
+    }
+    if verbose == 1 {
+        println("Created .zsync with ${dlen / blocksize} blocks")
     }
 }
 

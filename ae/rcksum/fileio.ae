@@ -1,10 +1,16 @@
 // SPDX-FileCopyrightText: 2026 Colin Phipps <cph@moria.org.uk>
 // SPDX-License-Identifier: Artistic-2.0
 //
-// Aether surface over the positional-I/O C shim (fileio.c). zsync needs
-// to scatter reconstructed blocks into the output file at arbitrary
-// offsets (pwrite) and read them back (pread) — std.fs has no offset
-// I/O yet, so these bind the uniquely-named zsync_io_* wrappers.
+// Aether surface over the positional-I/O C shim (fileio.c).
+//
+// NOTE: as of Aether 0.218, std.fs has native positional I/O
+// (fs.pwrite/pread/ftruncate/fsync, #640 — which this port surfaced).
+// We deliberately keep this thin int-fd shim because (a) the rest of the
+// port threads an int fd with a `< 0` sentinel through rcksum/download,
+// and std's API is ptr-handle based, and (b) the shim also provides the
+// mutable byte-buffer + binary-slice helpers std still lacks. The
+// positional ops here are a 1:1 match for the std calls and could be
+// swapped if the fd model is ever revisited.
 
 import std.string (*)
 
@@ -160,6 +166,19 @@ slice(src: string, src_len: int, start: int, len: int) -> string {
 extern zsync_buf_identity(b: ptr) -> string
 buf_as_string(b: ptr) -> string {
     return zsync_buf_identity(b)
+}
+
+// RFC1123Z formatting of a Unix epoch (UTC), for zsync's MTime header.
+// std only formats "now" as ISO-8601, so this covers arbitrary epochs.
+extern zsync_rfc1123z(epoch: long) -> string
+extern zsync_parse_rfc1123(s: string) -> long
+
+rfc1123z(epoch: int) -> string {
+    return zsync_rfc1123z(epoch)
+}
+
+parse_rfc1123(s: string) -> int {
+    return zsync_parse_rfc1123(s)
 }
 
 // Persistently copy 16 bytes out of a buf into a fresh, process-lifetime

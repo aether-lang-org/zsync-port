@@ -193,6 +193,7 @@ typedef struct { const char* _0; int _1; } _tuple_string_int;
 typedef struct { void* _0; const char* _1; } _tuple_ptr_string;
 typedef struct { int _0; int _1; int _2; int _3; } _tuple_int_int_int_int;
 typedef struct { int _0; int _1; } _tuple_int_int;
+typedef struct { const char* _0; int _1; int _2; const char* _3; } _tuple_string_int_int_string;
 typedef struct { const char* _0; const char* _1; } _tuple_string_string;
 
 typedef struct LocalTime LocalTime;
@@ -336,9 +337,13 @@ typedef struct BlockRanges {
 #define json_KIND_OUT_OF_MEMORY (2)
 #define json_KIND_INVALID_INPUT (3)
 // Forward declarations
+const char* VERSION(void);
 static _tuple_string_int string_strip_prefix(const char*, const char*);
+static int64_t os_now_monotonic_ns(void);
+static _tuple_int_string fs_mtime(const char*);
 static int fs_exists(const char*);
 static const char* fs_mkdir_p(const char*);
+static const char* fs_write_binary(const char*, const char*, int);
 static _tuple_string_int_string fs_read_binary(const char*);
 static void* client_request(const char*, const char*);
 static const char* client_set_header(void*, const char*, const char*);
@@ -385,12 +390,13 @@ static void* download_needed_byte_ranges(State*);
 static int download_submit_target_data(State*, int, const char*, int);
 static const char* download_complete(State*);
 static const char* download_lower(const char*);
-static _tuple_string_int_string clientlib_http_get(const char*);
-static _tuple_string_int_string clientlib_http_get_range(const char*, int, int);
+static const char* download_stats_line(State*);
+static const char* clientlib_basic_auth(const char*);
+static _tuple_string_int_int_string clientlib_http_get_auth(const char*, const char*, const char*);
+static _tuple_string_int_string clientlib_http_get_range_auth(const char*, int, int, const char*);
 static const char* clientlib_range_header(int, int);
 static const char* clientlib_copy_bytes(const char*, int);
-static _tuple_string_int_string clientlib_fetch_control(const char*);
-static const char* clientlib_fetch_remaining(void*, const char*);
+static const char* clientlib_fetch_remaining(void*, const char*, const char*);
 static const char* clientlib_concat3(const char*, const char*, const char*);
 static const char* clientlib_int_str(int);
 static int fileio_open_rw(const char*);
@@ -409,6 +415,7 @@ static const char* fileio_zero_prefix(const char*, int, int);
 static const char* fileio_pad_block(const char*, int, int, int, int);
 static const char* fileio_slice(const char*, int, int, int);
 static const char* fileio_buf_as_string(void*);
+static const char* fileio_rfc1123z(int);
 static const char* fileio_dup16(void*);
 static int rcksum_NO_BLOCK(void);
 static int rcksum_BITHASH_BITS(void);
@@ -429,6 +436,10 @@ static int rcksum_ranges_list_start(void*, int);
 static int rcksum_ranges_list_fin(void*, int);
 static _tuple_string_int rcksum_read_known_data_p(void*, int, int);
 static void rcksum_add_target_block_p(void*, int, int, int, const char*);
+static int rcksum_stat_hash_hit_p(void*);
+static int rcksum_stat_weak_hit_p(void*);
+static int rcksum_stat_strong_hit_p(void*);
+static int rcksum_stat_checksummed_p(void*);
 static void rcksum_add_target_block(RcksumState*, int, int, int, const char*);
 static int rcksum_blocks_todo(RcksumState*);
 static int rcksum_calc_rhash(RcksumState*, int);
@@ -479,11 +490,14 @@ static int ranges_next_contained_after(BlockRanges*, int);
 static int ranges_list_len(void*);
 static BlockPair* ranges_list_pair(void*, int);
 static void* ranges_missing_blocks_between(BlockRanges*, int, int);
-const char* first_url(void*, const char*);
-int url_count(void*);
-const char* url_at(void*, int);
+_tuple_string_int_string get_control(const char*, const char*, const char*, int);
+const char* fetch_from_urls(void*, void*, const char*, const char*, int);
+void feed_seed_if_exists(void*, const char*, int);
+const char* creds_of(const char*);
+const char* resolve(const char*, const char*);
 int is_abs(const char*);
-const char* join_url(const char*, const char*);
+int last_slash(const char*);
+const char* str_owned(const char*);
 
 // Extern C function: string_new
 void* string_new(const char*);
@@ -697,6 +711,33 @@ void* string_format_list(const char*, void*);
 
 // Extern C function: string_glob_match_raw
 int string_glob_match_raw(const char*, const char*, int);
+
+// Extern C function: list_new
+void* list_new(void);
+
+// Extern C function: list_add_raw
+int list_add_raw(void*, void*);
+
+// Extern C function: list_add_string_owned
+int list_add_string_owned(void*, void*);
+
+// Extern C function: list_get_raw
+void* list_get_raw(void*, int);
+
+// Extern C function: list_set
+void list_set(void*, int, void*);
+
+// Extern C function: list_size
+int list_size(void*);
+
+// Extern C function: list_remove
+void list_remove(void*, int);
+
+// Extern C function: list_clear
+void list_clear(void*);
+
+// Extern C function: list_free
+void list_free(void*);
 
 // Extern C function: os_system
 int os_system(const char*);
@@ -922,6 +963,36 @@ const char* path_extension(const char*);
 // Extern C function: path_is_absolute
 int path_is_absolute(const char*);
 
+// Extern C function: path_clean
+const char* path_clean(const char*);
+
+// Extern C function: path_is_within_base
+int path_is_within_base(const char*, const char*);
+
+// Extern C function: path_rel
+const char* path_rel(const char*, const char*);
+
+// Extern C function: fs_pwrite_raw
+int64_t fs_pwrite_raw(void*, const char*, int, int64_t);
+
+// Extern C function: fs_pread_raw
+int fs_pread_raw(void*, int, int64_t);
+
+// Extern C function: fs_get_pread
+const char* fs_get_pread(void);
+
+// Extern C function: fs_get_pread_length
+int fs_get_pread_length(void);
+
+// Extern C function: fs_release_pread
+void fs_release_pread(void);
+
+// Extern C function: fs_ftruncate_raw
+const char* fs_ftruncate_raw(void*, int64_t);
+
+// Extern C function: fs_fsync_raw
+const char* fs_fsync_raw(void*);
+
 // Extern C function: fs_glob_raw
 void* fs_glob_raw(const char*);
 
@@ -1042,6 +1113,12 @@ void zsync_buf_free(void*);
 // Extern C function: zsync_buf_identity
 const char* zsync_buf_identity(void*);
 
+// Extern C function: zsync_rfc1123z
+const char* zsync_rfc1123z(int64_t);
+
+// Extern C function: zsync_parse_rfc1123
+int64_t zsync_parse_rfc1123(const char*);
+
 // Extern C function: zsync_dup16
 const char* zsync_dup16(void*);
 
@@ -1132,33 +1209,6 @@ void* json_create_object(void);
 // Extern C function: string_concat
 const char* string_concat(const char*, const char*);
 
-// Extern C function: list_new
-void* list_new(void);
-
-// Extern C function: list_add_raw
-int list_add_raw(void*, void*);
-
-// Extern C function: list_add_string_owned
-int list_add_string_owned(void*, void*);
-
-// Extern C function: list_get_raw
-void* list_get_raw(void*, int);
-
-// Extern C function: list_set
-void list_set(void*, int, void*);
-
-// Extern C function: list_size
-int list_size(void*);
-
-// Extern C function: list_remove
-void list_remove(void*, int);
-
-// Extern C function: list_clear
-void list_clear(void*);
-
-// Extern C function: list_free
-void list_free(void*);
-
 // Extern C function: malloc (libc-provided, declaration skipped)
 // Extern C function: malloc (libc-provided, declaration skipped)
 // Extern C function: free (libc-provided, declaration skipped)
@@ -1228,6 +1278,18 @@ int cryptography_get_binary_digest_length(void);
 // Extern C function: cryptography_release_binary_digest
 void cryptography_release_binary_digest(void);
 
+// Extern C function: cryptography_random_bytes_raw
+int cryptography_random_bytes_raw(int);
+
+// Extern C function: cryptography_get_random_bytes
+const char* cryptography_get_random_bytes(void);
+
+// Extern C function: cryptography_get_random_bytes_length
+int cryptography_get_random_bytes_length(void);
+
+// Extern C function: cryptography_release_random_bytes
+void cryptography_release_random_bytes(void);
+
 // Extern C function: string_new_with_length
 void* string_new_with_length(const char*, int);
 
@@ -1265,14 +1327,9 @@ void* map_keys_raw(void*);
 void map_keys_free(void*);
 
 // Extern C function: malloc (libc-provided, declaration skipped)
-// Extern C function: list_size
-int list_size(void*);
-
-// Extern C function: list_get_raw
-void* list_get_raw(void*, int);
-
 
 // Import: std.string
+// Import: std.list
 // Import: std.os
 // Import: std.fs
 // Import: std.http.client
@@ -1280,6 +1337,12 @@ void* list_get_raw(void*, int);
 // Import: zsync.download
 // Import: cmd.clientlib
 // Import: rcksum.fileio
+#line 22 "cmd/zsync.ae"
+const char* VERSION(void) {
+#line 23 "cmd/zsync.ae"
+    return "0.7.1";
+}
+
 #line 363 "/home/paul/scm/aether/build/../std/string/module.ae"
 static _tuple_string_int string_strip_prefix(const char* s, const char* prefix) {
 if (string_starts_with(s, prefix) != 1) {
@@ -1296,29 +1359,63 @@ int s_len = string_length(s);
     return (_tuple_string_int){aether_uniform_heap_str((const char*)(string_substring(s, prefix_len, s_len)), 1), 1};
 }
 
-#line 326 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 442 "/home/paul/scm/aether/build/../std/os/module.ae"
+static int64_t os_now_monotonic_ns(void) {
+#line 443 "/home/paul/scm/aether/build/../std/os/module.ae"
+    return os_now_monotonic_ns_raw();
+}
+
+#line 331 "/home/paul/scm/aether/build/../std/fs/module.ae"
+static _tuple_int_string fs_mtime(const char* path) {
+#line 332 "/home/paul/scm/aether/build/../std/fs/module.ae"
+int m = file_mtime_raw(aether_string_data(path));
+if (m < 0) {
+        {
+#line 334 "/home/paul/scm/aether/build/../std/fs/module.ae"
+            return (_tuple_int_string){0, "cannot stat file"};
+        }
+    }
+#line 336 "/home/paul/scm/aether/build/../std/fs/module.ae"
+    return (_tuple_int_string){m, ""};
+}
+
+#line 345 "/home/paul/scm/aether/build/../std/fs/module.ae"
 static int fs_exists(const char* path) {
-#line 327 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 346 "/home/paul/scm/aether/build/../std/fs/module.ae"
     return fs_path_exists(aether_string_data(path));
 }
 
-#line 365 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 384 "/home/paul/scm/aether/build/../std/fs/module.ae"
 static const char* fs_mkdir_p(const char* path) {
-#line 366 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 385 "/home/paul/scm/aether/build/../std/fs/module.ae"
 int ok = fs_mkdir_p_raw(aether_string_data(path));
 if (ok == 0) {
         {
-#line 368 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 387 "/home/paul/scm/aether/build/../std/fs/module.ae"
             return "cannot mkdir -p";
         }
     }
-#line 370 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 389 "/home/paul/scm/aether/build/../std/fs/module.ae"
     return "";
 }
 
-#line 515 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 468 "/home/paul/scm/aether/build/../std/fs/module.ae"
+static const char* fs_write_binary(const char* path, const char* data, int length) {
+#line 469 "/home/paul/scm/aether/build/../std/fs/module.ae"
+int ok = fs_write_binary_raw(aether_string_data(path), aether_string_data(data), length);
+if (ok == 0) {
+        {
+#line 471 "/home/paul/scm/aether/build/../std/fs/module.ae"
+            return "binary write failed";
+        }
+    }
+#line 473 "/home/paul/scm/aether/build/../std/fs/module.ae"
+    return "";
+}
+
+#line 534 "/home/paul/scm/aether/build/../std/fs/module.ae"
 static _tuple_string_int_string fs_read_binary(const char* path) {
-#line 521 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 540 "/home/paul/scm/aether/build/../std/fs/module.ae"
     return fs_read_binary_tuple(aether_string_data(path));
 }
 
@@ -2363,161 +2460,236 @@ static const char* download_lower(const char* s) {
     return aether_uniform_heap_str((const char*)(string_to_lower(s)), 1);
 }
 
-#line 16 "cmd/clientlib.ae"
-static _tuple_string_int_string clientlib_http_get(const char* url) {
-    int _heap_err = 0; (void)_heap_err;
-    const char* err = NULL;
-    int _heap_body = 0; (void)_heap_body;
-    const char* body = NULL;
-    int _heap_owned = 0; (void)_heap_owned;
-    const char* owned = NULL;
-#line 17 "cmd/clientlib.ae"
-void* req = client_request("GET", url);
-#line 18 "cmd/clientlib.ae"
-client_set_header(req, "User-Agent", "zsync-aether/0.7.1");
-#line 19 "cmd/clientlib.ae"
-    _tuple_ptr_string _tup4 = client_send_request(req);
-    void* resp = _tup4._0;
-    { const char* _tmp_old = err; err = _tup4._1; if (_heap_err) aether_heap_str_free(_tmp_old); _heap_err = 1; }
-#line 20 "cmd/clientlib.ae"
-client_request_free(req);
-if (strcmp(_aether_safe_str(err), _aether_safe_str("")) != 0) {
-        {
-#line 22 "cmd/clientlib.ae"
-            _tuple_string_int_string _builder_ret = (_tuple_string_int_string){aether_uniform_heap_str((const char*)(""), 0), 0, aether_uniform_heap_str((const char*)(err), _heap_err)};
-            /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
-            return _builder_ret;
-        }
-    }
-#line 24 "cmd/clientlib.ae"
-int status = client_response_status(resp);
-if (status != 200) {
-        {
-#line 26 "cmd/clientlib.ae"
-client_response_free(resp);
-#line 27 "cmd/clientlib.ae"
-            _tuple_string_int_string _builder_ret = (_tuple_string_int_string){aether_uniform_heap_str((const char*)(""), 0), 0, aether_uniform_heap_str((const char*)(({ const char* _ad_2 = (const char*)(clientlib_int_str(status)); const char* _ad_r = clientlib_concat3("http status ", _ad_2, ""); aether_heap_str_free(_ad_2); _ad_r; })), 1)};
-            /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
-            return _builder_ret;
-        }
-    }
-#line 29 "cmd/clientlib.ae"
-int n = client_response_body_length(resp);
-#line 30 "cmd/clientlib.ae"
-{ const char* _tmp_old = body; body = client_response_body(resp); if (_heap_body) aether_heap_str_free(_tmp_old); _heap_body = 0; }
-#line 31 "cmd/clientlib.ae"
-{ const char* _tmp_old = owned; owned = clientlib_copy_bytes(body, n); if (_heap_owned) aether_heap_str_free(_tmp_old); _heap_owned = 1; }
-#line 32 "cmd/clientlib.ae"
-client_response_free(resp);
-#line 33 "cmd/clientlib.ae"
-    _tuple_string_int_string _builder_ret = (_tuple_string_int_string){aether_uniform_heap_str((const char*)(owned), _heap_owned), n, aether_uniform_heap_str((const char*)(""), 0)};
-    /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
-    return _builder_ret;
-    /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
+#line 174 "zsync/download.ae"
+static const char* download_stats_line(State* s) {
+    int _heap_out = 0; (void)_heap_out;
+    const char* out = NULL;
+#line 175 "zsync/download.ae"
+int hh = rcksum_stat_hash_hit_p(s->rs);
+#line 176 "zsync/download.ae"
+int wh = rcksum_stat_weak_hit_p(s->rs);
+#line 177 "zsync/download.ae"
+int sh = rcksum_stat_strong_hit_p(s->rs);
+#line 178 "zsync/download.ae"
+int ck = rcksum_stat_checksummed_p(s->rs);
+#line 179 "zsync/download.ae"
+{ const char* _tmp_old = out; out = ({ const char* _ad_2 = (const char*)(string_from_int(hh)); const char* _ad_r = string_concat("hash stats: hash hit ", _ad_2); aether_heap_str_free(_ad_2); _ad_r; }); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 1; }
+#line 180 "zsync/download.ae"
+{ const char* _tmp_old = out; out = string_concat(out, ", weak hit "); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 1; }
+#line 181 "zsync/download.ae"
+{ const char* _tmp_old = out; out = ({ const char* _ad_3 = (const char*)(string_from_int(wh)); const char* _ad_r = string_concat(out, _ad_3); aether_heap_str_free(_ad_3); _ad_r; }); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 1; }
+#line 182 "zsync/download.ae"
+{ const char* _tmp_old = out; out = string_concat(out, ", checksums calculated "); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 1; }
+#line 183 "zsync/download.ae"
+{ const char* _tmp_old = out; out = ({ const char* _ad_4 = (const char*)(string_from_int(ck)); const char* _ad_r = string_concat(out, _ad_4); aether_heap_str_free(_ad_4); _ad_r; }); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 1; }
+#line 184 "zsync/download.ae"
+{ const char* _tmp_old = out; out = string_concat(out, ", strong hit "); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 1; }
+#line 185 "zsync/download.ae"
+{ const char* _tmp_old = out; out = ({ const char* _ad_5 = (const char*)(string_from_int(sh)); const char* _ad_r = string_concat(out, _ad_5); aether_heap_str_free(_ad_5); _ad_r; }); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 1; }
+#line 186 "zsync/download.ae"
+    const char* _no_defer_ret = aether_uniform_heap_str((const char*)(out), _heap_out);
+    return _no_defer_ret;
 }
 
-#line 38 "cmd/clientlib.ae"
-static _tuple_string_int_string clientlib_http_get_range(const char* url, int start, int fin) {
+#line 18 "cmd/clientlib.ae"
+static const char* clientlib_basic_auth(const char* creds) {
+    int _heap_enc = 0; (void)_heap_enc;
+    const char* enc = NULL;
+    int _heap_e = 0; (void)_heap_e;
+    const char* e = NULL;
+if (string_equals(creds, "") == 1) {
+        {
+#line 20 "cmd/clientlib.ae"
+            const char* _builder_ret = aether_uniform_heap_str((const char*)(""), 0);
+            /* deferred */ if (_heap_e) { aether_heap_str_free(e); e = NULL; _heap_e = 0; }
+            /* deferred */ if (_heap_enc) { aether_heap_str_free(enc); enc = NULL; _heap_enc = 0; }
+            return _builder_ret;
+        }
+    }
+#line 22 "cmd/clientlib.ae"
+    _tuple_string_string _tup4 = cryptography_base64_encode_padded(creds, string_length(creds));
+    { const char* _tmp_old = enc; enc = _tup4._0; if (_heap_enc) aether_heap_str_free(_tmp_old); _heap_enc = 0; }
+    { const char* _tmp_old = e; e = _tup4._1; if (_heap_e) aether_heap_str_free(_tmp_old); _heap_e = 0; }
+if (strcmp(_aether_safe_str(e), _aether_safe_str("")) != 0) {
+        {
+#line 24 "cmd/clientlib.ae"
+            const char* _builder_ret = aether_uniform_heap_str((const char*)(""), 0);
+            /* deferred */ if (_heap_e) { aether_heap_str_free(e); e = NULL; _heap_e = 0; }
+            /* deferred */ if (_heap_enc) { aether_heap_str_free(enc); enc = NULL; _heap_enc = 0; }
+            return _builder_ret;
+        }
+    }
+#line 26 "cmd/clientlib.ae"
+    const char* _builder_ret = aether_uniform_heap_str((const char*)(string_concat("Basic ", enc)), 1);
+    /* deferred */ if (_heap_e) { aether_heap_str_free(e); e = NULL; _heap_e = 0; }
+    /* deferred */ if (_heap_enc) { aether_heap_str_free(enc); enc = NULL; _heap_enc = 0; }
+    return _builder_ret;
+    /* deferred */ if (_heap_e) { aether_heap_str_free(e); e = NULL; _heap_e = 0; }
+    /* deferred */ if (_heap_enc) { aether_heap_str_free(enc); enc = NULL; _heap_enc = 0; }
+}
+
+#line 32 "cmd/clientlib.ae"
+static _tuple_string_int_int_string clientlib_http_get_auth(const char* url, const char* auth, const char* ims) {
     int _heap_err = 0; (void)_heap_err;
     const char* err = NULL;
     int _heap_body = 0; (void)_heap_body;
     const char* body = NULL;
     int _heap_owned = 0; (void)_heap_owned;
     const char* owned = NULL;
-#line 39 "cmd/clientlib.ae"
+#line 33 "cmd/clientlib.ae"
 void* req = client_request("GET", url);
-#line 40 "cmd/clientlib.ae"
+#line 34 "cmd/clientlib.ae"
 client_set_header(req, "User-Agent", "zsync-aether/0.7.1");
+if (string_equals(auth, "") == 0) {
+        {
+#line 36 "cmd/clientlib.ae"
+client_set_header(req, "Authorization", auth);
+        }
+    }
+if (string_equals(ims, "") == 0) {
+        {
+#line 39 "cmd/clientlib.ae"
+client_set_header(req, "If-Modified-Since", ims);
+        }
+    }
 #line 41 "cmd/clientlib.ae"
-({ const char* _ad_3 = (const char*)(clientlib_range_header(start, fin)); const char* _ad_r = client_set_header(req, "Range", _ad_3); aether_heap_str_free(_ad_3); _ad_r; });
-#line 42 "cmd/clientlib.ae"
     _tuple_ptr_string _tup5 = client_send_request(req);
     void* resp = _tup5._0;
     { const char* _tmp_old = err; err = _tup5._1; if (_heap_err) aether_heap_str_free(_tmp_old); _heap_err = 1; }
-#line 43 "cmd/clientlib.ae"
+#line 42 "cmd/clientlib.ae"
 client_request_free(req);
 if (strcmp(_aether_safe_str(err), _aether_safe_str("")) != 0) {
         {
-#line 45 "cmd/clientlib.ae"
+#line 44 "cmd/clientlib.ae"
+            _tuple_string_int_int_string _builder_ret = (_tuple_string_int_int_string){aether_uniform_heap_str((const char*)(""), 0), 0, 0, aether_uniform_heap_str((const char*)(err), _heap_err)};
+            /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
+            return _builder_ret;
+        }
+    }
+#line 46 "cmd/clientlib.ae"
+int status = client_response_status(resp);
+if (status == 304) {
+        {
+#line 48 "cmd/clientlib.ae"
+client_response_free(resp);
+#line 49 "cmd/clientlib.ae"
+            _tuple_string_int_int_string _builder_ret = (_tuple_string_int_int_string){aether_uniform_heap_str((const char*)(""), 0), 0, 304, aether_uniform_heap_str((const char*)(""), 0)};
+            /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
+            return _builder_ret;
+        }
+    }
+if (status != 200) {
+        {
+#line 52 "cmd/clientlib.ae"
+client_response_free(resp);
+#line 53 "cmd/clientlib.ae"
+            _tuple_string_int_int_string _builder_ret = (_tuple_string_int_int_string){aether_uniform_heap_str((const char*)(""), 0), 0, status, aether_uniform_heap_str((const char*)(({ const char* _ad_6 = (const char*)(clientlib_int_str(status)); const char* _ad_r = clientlib_concat3("http status ", _ad_6, ""); aether_heap_str_free(_ad_6); _ad_r; })), 1)};
+            /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
+            return _builder_ret;
+        }
+    }
+#line 55 "cmd/clientlib.ae"
+int n = client_response_body_length(resp);
+#line 56 "cmd/clientlib.ae"
+{ const char* _tmp_old = body; body = client_response_body(resp); if (_heap_body) aether_heap_str_free(_tmp_old); _heap_body = 0; }
+#line 57 "cmd/clientlib.ae"
+{ const char* _tmp_old = owned; owned = clientlib_copy_bytes(body, n); if (_heap_owned) aether_heap_str_free(_tmp_old); _heap_owned = 1; }
+#line 58 "cmd/clientlib.ae"
+client_response_free(resp);
+#line 59 "cmd/clientlib.ae"
+    _tuple_string_int_int_string _builder_ret = (_tuple_string_int_int_string){aether_uniform_heap_str((const char*)(owned), _heap_owned), n, 200, aether_uniform_heap_str((const char*)(""), 0)};
+    /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
+    return _builder_ret;
+    /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
+}
+
+#line 70 "cmd/clientlib.ae"
+static _tuple_string_int_string clientlib_http_get_range_auth(const char* url, int start, int fin, const char* auth) {
+    int _heap_err = 0; (void)_heap_err;
+    const char* err = NULL;
+    int _heap_body = 0; (void)_heap_body;
+    const char* body = NULL;
+    int _heap_owned = 0; (void)_heap_owned;
+    const char* owned = NULL;
+#line 71 "cmd/clientlib.ae"
+void* req = client_request("GET", url);
+#line 72 "cmd/clientlib.ae"
+client_set_header(req, "User-Agent", "zsync-aether/0.7.1");
+#line 73 "cmd/clientlib.ae"
+({ const char* _ad_7 = (const char*)(clientlib_range_header(start, fin)); const char* _ad_r = client_set_header(req, "Range", _ad_7); aether_heap_str_free(_ad_7); _ad_r; });
+if (string_equals(auth, "") == 0) {
+        {
+#line 75 "cmd/clientlib.ae"
+client_set_header(req, "Authorization", auth);
+        }
+    }
+#line 77 "cmd/clientlib.ae"
+    _tuple_ptr_string _tup6 = client_send_request(req);
+    void* resp = _tup6._0;
+    { const char* _tmp_old = err; err = _tup6._1; if (_heap_err) aether_heap_str_free(_tmp_old); _heap_err = 1; }
+#line 78 "cmd/clientlib.ae"
+client_request_free(req);
+if (strcmp(_aether_safe_str(err), _aether_safe_str("")) != 0) {
+        {
+#line 80 "cmd/clientlib.ae"
             _tuple_string_int_string _builder_ret = (_tuple_string_int_string){aether_uniform_heap_str((const char*)(""), 0), 0, aether_uniform_heap_str((const char*)(err), _heap_err)};
             /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
             return _builder_ret;
         }
     }
-#line 47 "cmd/clientlib.ae"
+#line 82 "cmd/clientlib.ae"
 int status = client_response_status(resp);
 if (status != 206) {
         {
-#line 49 "cmd/clientlib.ae"
+#line 84 "cmd/clientlib.ae"
 client_response_free(resp);
-#line 50 "cmd/clientlib.ae"
-            _tuple_string_int_string _builder_ret = (_tuple_string_int_string){aether_uniform_heap_str((const char*)(""), 0), 0, aether_uniform_heap_str((const char*)(({ const char* _ad_4 = (const char*)(clientlib_int_str(status)); const char* _ad_r = clientlib_concat3("expected 206, got ", _ad_4, ""); aether_heap_str_free(_ad_4); _ad_r; })), 1)};
+#line 85 "cmd/clientlib.ae"
+            _tuple_string_int_string _builder_ret = (_tuple_string_int_string){aether_uniform_heap_str((const char*)(""), 0), 0, aether_uniform_heap_str((const char*)(({ const char* _ad_8 = (const char*)(clientlib_int_str(status)); const char* _ad_r = clientlib_concat3("expected 206, got ", _ad_8, ""); aether_heap_str_free(_ad_8); _ad_r; })), 1)};
             /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
             return _builder_ret;
         }
     }
-#line 52 "cmd/clientlib.ae"
+#line 87 "cmd/clientlib.ae"
 int n = client_response_body_length(resp);
-#line 53 "cmd/clientlib.ae"
+#line 88 "cmd/clientlib.ae"
 { const char* _tmp_old = body; body = client_response_body(resp); if (_heap_body) aether_heap_str_free(_tmp_old); _heap_body = 0; }
-#line 54 "cmd/clientlib.ae"
+#line 89 "cmd/clientlib.ae"
 { const char* _tmp_old = owned; owned = clientlib_copy_bytes(body, n); if (_heap_owned) aether_heap_str_free(_tmp_old); _heap_owned = 1; }
-#line 55 "cmd/clientlib.ae"
+#line 90 "cmd/clientlib.ae"
 client_response_free(resp);
-#line 56 "cmd/clientlib.ae"
+#line 91 "cmd/clientlib.ae"
     _tuple_string_int_string _builder_ret = (_tuple_string_int_string){aether_uniform_heap_str((const char*)(owned), _heap_owned), n, aether_uniform_heap_str((const char*)(""), 0)};
     /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
     return _builder_ret;
     /* deferred */ if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
 }
 
-#line 60 "cmd/clientlib.ae"
+#line 99 "cmd/clientlib.ae"
 static const char* clientlib_range_header(int start, int fin) {
-#line 61 "cmd/clientlib.ae"
-    return aether_uniform_heap_str((const char*)(({ const char* _ad_5 = (const char*)(clientlib_int_str(start)); const char* _ad_6 = (const char*)(({ const char* _ad_7 = (const char*)(clientlib_int_str(fin)); const char* _ad_r = clientlib_concat3("-", _ad_7, ""); aether_heap_str_free(_ad_7); _ad_r; })); const char* _ad_r = clientlib_concat3("bytes=", _ad_5, _ad_6); aether_heap_str_free(_ad_5); aether_heap_str_free(_ad_6); _ad_r; })), 1);
+#line 100 "cmd/clientlib.ae"
+    return aether_uniform_heap_str((const char*)(({ const char* _ad_9 = (const char*)(clientlib_int_str(start)); const char* _ad_10 = (const char*)(({ const char* _ad_11 = (const char*)(clientlib_int_str(fin)); const char* _ad_r = clientlib_concat3("-", _ad_11, ""); aether_heap_str_free(_ad_11); _ad_r; })); const char* _ad_r = clientlib_concat3("bytes=", _ad_9, _ad_10); aether_heap_str_free(_ad_9); aether_heap_str_free(_ad_10); _ad_r; })), 1);
 }
 
-#line 66 "cmd/clientlib.ae"
+#line 105 "cmd/clientlib.ae"
 static const char* clientlib_copy_bytes(const char* body, int n) {
-#line 67 "cmd/clientlib.ae"
+#line 106 "cmd/clientlib.ae"
 void* b = fileio_buf_alloc(n);
-#line 68 "cmd/clientlib.ae"
+#line 107 "cmd/clientlib.ae"
 int i = 0;
 while (i < n) {
         {
-#line 70 "cmd/clientlib.ae"
+#line 109 "cmd/clientlib.ae"
 fileio_buf_set(b, i, (string_char_at_n(body, n, i) & 0xff));
-#line 71 "cmd/clientlib.ae"
+#line 110 "cmd/clientlib.ae"
 i = (i + 1);
         }
     }
-#line 73 "cmd/clientlib.ae"
+#line 112 "cmd/clientlib.ae"
     return aether_uniform_heap_str((const char*)(fileio_buf_to_str(b, n)), 1);
 }
 
-#line 77 "cmd/clientlib.ae"
-static _tuple_string_int_string clientlib_fetch_control(const char* source) {
-    int _heap_data = 0; (void)_heap_data;
-    const char* data = NULL;
-    int _heap_e = 0; (void)_heap_e;
-    const char* e = NULL;
-if (fs_exists(source) == 1) {
-        {
-#line 79 "cmd/clientlib.ae"
-            _tuple_string_int_string _tup6 = fs_read_binary(source);
-            { const char* _tmp_old = data; data = _tup6._0; if (_heap_data) aether_heap_str_free(_tmp_old); _heap_data = 1; }
-            int n = _tup6._1;
-            { const char* _tmp_old = e; e = _tup6._2; if (_heap_e) aether_heap_str_free(_tmp_old); _heap_e = 0; }
-#line 80 "cmd/clientlib.ae"
-            return (_tuple_string_int_string){aether_uniform_heap_str((const char*)(data), _heap_data), n, aether_uniform_heap_str((const char*)(e), _heap_e)};
-        }
-    }
-#line 82 "cmd/clientlib.ae"
-    return clientlib_http_get(source);
-}
-
-#line 87 "cmd/clientlib.ae"
-static const char* clientlib_fetch_remaining(void* st, const char* url) {
+#line 127 "cmd/clientlib.ae"
+static const char* clientlib_fetch_remaining(void* st, const char* url, const char* auth) {
     int _heap_chunk = 0; (void)_heap_chunk;
     const char* chunk = NULL;
     int _heap_e = 0; (void)_heap_e;
@@ -2529,49 +2701,49 @@ static const char* clientlib_fetch_remaining(void* st, const char* url) {
     int rfin;
 while (download_status(st) < 2) {
         {
-#line 89 "cmd/clientlib.ae"
+#line 129 "cmd/clientlib.ae"
 needed = download_needed_byte_ranges(st);
-#line 90 "cmd/clientlib.ae"
+#line 130 "cmd/clientlib.ae"
 nn = download_br_count(needed);
 if (nn == 0) {
                 {
-#line 92 "cmd/clientlib.ae"
+#line 132 "cmd/clientlib.ae"
                     const char* _builder_ret = aether_uniform_heap_str((const char*)(""), 0);
                     if (_heap_e) { aether_heap_str_free(e); e = NULL; _heap_e = 0; }
                     /* deferred */ if (_heap_chunk) { aether_heap_str_free(chunk); chunk = NULL; _heap_chunk = 0; }
                     return _builder_ret;
                 }
             }
-#line 94 "cmd/clientlib.ae"
+#line 134 "cmd/clientlib.ae"
 i = 0;
 while (i < nn) {
                 {
-#line 96 "cmd/clientlib.ae"
+#line 136 "cmd/clientlib.ae"
 rstart = download_br_at_start(needed, i);
-#line 97 "cmd/clientlib.ae"
+#line 137 "cmd/clientlib.ae"
 rfin = download_br_at_fin(needed, i);
-#line 98 "cmd/clientlib.ae"
-                    _tuple_string_int_string _tup7 = clientlib_http_get_range(url, rstart, rfin);
+#line 138 "cmd/clientlib.ae"
+                    _tuple_string_int_string _tup7 = clientlib_http_get_range_auth(url, rstart, rfin, auth);
                     { const char* _tmp_old = chunk; chunk = _tup7._0; if (_heap_chunk) aether_heap_str_free(_tmp_old); _heap_chunk = 1; }
                     int clen = _tup7._1;
                     { const char* _tmp_old = e; e = _tup7._2; if (_heap_e) aether_heap_str_free(_tmp_old); _heap_e = 1; }
 if (strcmp(_aether_safe_str(e), _aether_safe_str("")) != 0) {
                         {
-#line 100 "cmd/clientlib.ae"
+#line 140 "cmd/clientlib.ae"
                             const char* _builder_ret = aether_uniform_heap_str((const char*)(e), _heap_e);
                             /* deferred */ if (_heap_chunk) { aether_heap_str_free(chunk); chunk = NULL; _heap_chunk = 0; }
                             return _builder_ret;
                         }
                     }
-#line 102 "cmd/clientlib.ae"
+#line 142 "cmd/clientlib.ae"
 download_submit_target_data(st, rstart, chunk, clen);
-#line 103 "cmd/clientlib.ae"
+#line 143 "cmd/clientlib.ae"
 i = (i + 1);
                 }
             }
         }
     }
-#line 106 "cmd/clientlib.ae"
+#line 146 "cmd/clientlib.ae"
     const char* _builder_ret = aether_uniform_heap_str((const char*)(""), 0);
     if (_heap_e) { aether_heap_str_free(e); e = NULL; _heap_e = 0; }
     /* deferred */ if (_heap_chunk) { aether_heap_str_free(chunk); chunk = NULL; _heap_chunk = 0; }
@@ -2579,197 +2751,202 @@ i = (i + 1);
     /* deferred */ if (_heap_chunk) { aether_heap_str_free(chunk); chunk = NULL; _heap_chunk = 0; }
 }
 
-#line 109 "cmd/clientlib.ae"
+#line 149 "cmd/clientlib.ae"
 static const char* clientlib_concat3(const char* a, const char* b, const char* c) {
-#line 110 "cmd/clientlib.ae"
-    return aether_uniform_heap_str((const char*)(({ const char* _ad_8 = (const char*)(string_concat(a, b)); const char* _ad_r = string_concat(_ad_8, c); aether_heap_str_free(_ad_8); _ad_r; })), 1);
+#line 150 "cmd/clientlib.ae"
+    return aether_uniform_heap_str((const char*)(({ const char* _ad_12 = (const char*)(string_concat(a, b)); const char* _ad_r = string_concat(_ad_12, c); aether_heap_str_free(_ad_12); _ad_r; })), 1);
 }
 
-#line 113 "cmd/clientlib.ae"
+#line 153 "cmd/clientlib.ae"
 static const char* clientlib_int_str(int v) {
-#line 114 "cmd/clientlib.ae"
+#line 154 "cmd/clientlib.ae"
     return aether_uniform_heap_str((const char*)(string_from_int(v)), 1);
 }
 
-#line 23 "rcksum/fileio.ae"
+#line 29 "rcksum/fileio.ae"
 static int fileio_open_rw(const char* path) {
-#line 24 "rcksum/fileio.ae"
+#line 30 "rcksum/fileio.ae"
     return zsync_io_open_rw_trunc(aether_string_data(path));
 }
 
-#line 36 "rcksum/fileio.ae"
+#line 42 "rcksum/fileio.ae"
 static int fileio_write_at(int fd, const char* data, int len, int offset) {
-#line 37 "rcksum/fileio.ae"
+#line 43 "rcksum/fileio.ae"
 int64_t written = zsync_io_pwrite(fd, aether_string_data(data), len, offset);
-#line 38 "rcksum/fileio.ae"
+#line 44 "rcksum/fileio.ae"
     return written;
 }
 
-#line 44 "rcksum/fileio.ae"
+#line 50 "rcksum/fileio.ae"
 static _tuple_string_int fileio_read_at(int fd, int len, int offset) {
     int _heap_buf = 0; (void)_heap_buf;
     const char* buf = NULL;
     int _heap_s = 0; (void)_heap_s;
     const char* s = NULL;
-#line 45 "rcksum/fileio.ae"
+#line 51 "rcksum/fileio.ae"
 { const char* _tmp_old = buf; buf = zsync_io_pread_alloc(fd, len, offset); if (_heap_buf) aether_heap_str_free(_tmp_old); _heap_buf = 0; }
-#line 46 "rcksum/fileio.ae"
+#line 52 "rcksum/fileio.ae"
 int64_t n = zsync_io_last_read_len();
 if (n < 0) {
         {
-#line 48 "rcksum/fileio.ae"
+#line 54 "rcksum/fileio.ae"
             _tuple_string_int _builder_ret = (_tuple_string_int){aether_uniform_heap_str((const char*)(""), 0), (-(1))};
             /* deferred */ if (_heap_buf) { aether_heap_str_free(buf); buf = NULL; _heap_buf = 0; }
             return _builder_ret;
         }
     }
-#line 52 "rcksum/fileio.ae"
+#line 58 "rcksum/fileio.ae"
 { const char* _tmp_old = s; s = string_new_with_length(buf, n); if (_heap_s) aether_heap_str_free(_tmp_old); _heap_s = 1; }
-#line 53 "rcksum/fileio.ae"
+#line 59 "rcksum/fileio.ae"
     _tuple_string_int _builder_ret = (_tuple_string_int){aether_uniform_heap_str((const char*)(s), _heap_s), n};
     /* deferred */ if (_heap_buf) { aether_heap_str_free(buf); buf = NULL; _heap_buf = 0; }
     return _builder_ret;
     /* deferred */ if (_heap_buf) { aether_heap_str_free(buf); buf = NULL; _heap_buf = 0; }
 }
 
-#line 56 "rcksum/fileio.ae"
+#line 62 "rcksum/fileio.ae"
 static int fileio_truncate_to(int fd, int length) {
-#line 57 "rcksum/fileio.ae"
+#line 63 "rcksum/fileio.ae"
     return zsync_io_ftruncate(fd, length);
 }
 
-#line 60 "rcksum/fileio.ae"
+#line 66 "rcksum/fileio.ae"
 static int fileio_close_fd(int fd) {
-#line 61 "rcksum/fileio.ae"
+#line 67 "rcksum/fileio.ae"
     return zsync_io_close(fd);
 }
 
-#line 64 "rcksum/fileio.ae"
+#line 70 "rcksum/fileio.ae"
 static int fileio_sync_fd(int fd) {
-#line 65 "rcksum/fileio.ae"
+#line 71 "rcksum/fileio.ae"
     return zsync_io_fsync(fd);
 }
 
-#line 79 "rcksum/fileio.ae"
+#line 85 "rcksum/fileio.ae"
 static void* fileio_buf_alloc(int n) {
-#line 80 "rcksum/fileio.ae"
+#line 86 "rcksum/fileio.ae"
     return zsync_buf_alloc(n);
 }
 
-#line 85 "rcksum/fileio.ae"
+#line 91 "rcksum/fileio.ae"
 static const char* fileio_buf_alloc_str(int n) {
-#line 86 "rcksum/fileio.ae"
+#line 92 "rcksum/fileio.ae"
     return aether_uniform_heap_str((const char*)(string_new_with_length(zsync_buf_alloc_str(n), n)), 1);
 }
 
-#line 89 "rcksum/fileio.ae"
+#line 95 "rcksum/fileio.ae"
 static int fileio_buf_get(void* b, int i) {
-#line 90 "rcksum/fileio.ae"
+#line 96 "rcksum/fileio.ae"
     return zsync_buf_get(b, i);
 }
 
-#line 93 "rcksum/fileio.ae"
+#line 99 "rcksum/fileio.ae"
 static void fileio_buf_set(void* b, int i, int v) {
-#line 94 "rcksum/fileio.ae"
+#line 100 "rcksum/fileio.ae"
 zsync_buf_set(b, i, v);
 }
 
-#line 97 "rcksum/fileio.ae"
+#line 103 "rcksum/fileio.ae"
 static void fileio_buf_or(void* b, int i, int v) {
-#line 98 "rcksum/fileio.ae"
+#line 104 "rcksum/fileio.ae"
 zsync_buf_or(b, i, v);
 }
 
-#line 108 "rcksum/fileio.ae"
+#line 114 "rcksum/fileio.ae"
 static const char* fileio_buf_to_str(void* b, int n) {
     int _heap_s = 0; (void)_heap_s;
     const char* s = NULL;
-#line 109 "rcksum/fileio.ae"
+#line 115 "rcksum/fileio.ae"
 s = string_new_with_length(fileio_buf_as_string(b), n);
-#line 113 "rcksum/fileio.ae"
+#line 119 "rcksum/fileio.ae"
 string_retain(s);
-#line 114 "rcksum/fileio.ae"
+#line 120 "rcksum/fileio.ae"
     const char* _no_defer_ret = aether_uniform_heap_str((const char*)(s), _heap_s);
     return _no_defer_ret;
 }
 
-#line 119 "rcksum/fileio.ae"
+#line 125 "rcksum/fileio.ae"
 static const char* fileio_zero_prefix(const char* src, int src_len, int prefix) {
-#line 120 "rcksum/fileio.ae"
+#line 126 "rcksum/fileio.ae"
 void* out = zsync_buf_alloc(src_len);
-#line 121 "rcksum/fileio.ae"
+#line 127 "rcksum/fileio.ae"
 int i = 0;
 while (i < src_len) {
         {
 if (i < prefix) {
                 {
-#line 124 "rcksum/fileio.ae"
+#line 130 "rcksum/fileio.ae"
 zsync_buf_set(out, i, 0);
                 }
             } else {
                 {
-#line 126 "rcksum/fileio.ae"
+#line 132 "rcksum/fileio.ae"
 zsync_buf_set(out, i, (string_char_at_n(src, src_len, i) & 0xff));
                 }
             }
-#line 128 "rcksum/fileio.ae"
+#line 134 "rcksum/fileio.ae"
 i = (i + 1);
         }
     }
-#line 130 "rcksum/fileio.ae"
+#line 136 "rcksum/fileio.ae"
     return aether_uniform_heap_str((const char*)(string_new_with_length(fileio_buf_as_string(out), src_len)), 1);
 }
 
-#line 135 "rcksum/fileio.ae"
+#line 141 "rcksum/fileio.ae"
 static const char* fileio_pad_block(const char* src, int src_len, int start, int rem, int blocksize) {
-#line 136 "rcksum/fileio.ae"
+#line 142 "rcksum/fileio.ae"
 void* out = zsync_buf_alloc(blocksize);
-#line 137 "rcksum/fileio.ae"
+#line 143 "rcksum/fileio.ae"
 int i = 0;
 while (i < rem) {
         {
-#line 139 "rcksum/fileio.ae"
+#line 145 "rcksum/fileio.ae"
 zsync_buf_set(out, i, (string_char_at_n(src, src_len, (start + i)) & 0xff));
-#line 140 "rcksum/fileio.ae"
+#line 146 "rcksum/fileio.ae"
 i = (i + 1);
         }
     }
-#line 142 "rcksum/fileio.ae"
+#line 148 "rcksum/fileio.ae"
     return aether_uniform_heap_str((const char*)(string_new_with_length(fileio_buf_as_string(out), blocksize)), 1);
 }
 
-#line 149 "rcksum/fileio.ae"
+#line 155 "rcksum/fileio.ae"
 static const char* fileio_slice(const char* src, int src_len, int start, int len) {
-#line 150 "rcksum/fileio.ae"
+#line 156 "rcksum/fileio.ae"
 void* out = zsync_buf_alloc(len);
-#line 151 "rcksum/fileio.ae"
+#line 157 "rcksum/fileio.ae"
 int i = 0;
 while (i < len) {
         {
-#line 153 "rcksum/fileio.ae"
+#line 159 "rcksum/fileio.ae"
 zsync_buf_set(out, i, (string_char_at_n(src, src_len, (start + i)) & 0xff));
-#line 154 "rcksum/fileio.ae"
+#line 160 "rcksum/fileio.ae"
 i = (i + 1);
         }
     }
-#line 156 "rcksum/fileio.ae"
+#line 162 "rcksum/fileio.ae"
     return aether_uniform_heap_str((const char*)(string_new_with_length(fileio_buf_as_string(out), len)), 1);
 }
 
-#line 161 "rcksum/fileio.ae"
+#line 167 "rcksum/fileio.ae"
 static const char* fileio_buf_as_string(void* b) {
-#line 162 "rcksum/fileio.ae"
+#line 168 "rcksum/fileio.ae"
     return zsync_buf_identity(b);
 }
 
 #line 176 "rcksum/fileio.ae"
-static const char* fileio_dup16(void* b) {
+static const char* fileio_rfc1123z(int epoch) {
 #line 177 "rcksum/fileio.ae"
+    return zsync_rfc1123z(epoch);
+}
+
+#line 195 "rcksum/fileio.ae"
+static const char* fileio_dup16(void* b) {
+#line 196 "rcksum/fileio.ae"
     return zsync_dup16(b);
 }
 
 // Import: std.json
-// Import: std.list
 // Import: rcksum.rcksum
 #line 31 "rcksum/rcksum.ae"
 static int rcksum_NO_BLOCK(void) {
@@ -2986,96 +3163,128 @@ rcksum_add_target_block(((RcksumState*)(z)), b, rsum_a, rsum_b, md4);
 }
 
 #line 221 "rcksum/rcksum.ae"
+static int rcksum_stat_hash_hit_p(void* z) {
+#line 222 "rcksum/rcksum.ae"
+RcksumState* s = ((RcksumState*)(z));
+#line 223 "rcksum/rcksum.ae"
+    return s->stats->hash_hit;
+}
+
+#line 225 "rcksum/rcksum.ae"
+static int rcksum_stat_weak_hit_p(void* z) {
+#line 226 "rcksum/rcksum.ae"
+RcksumState* s = ((RcksumState*)(z));
+#line 227 "rcksum/rcksum.ae"
+    return s->stats->weak_hit;
+}
+
+#line 229 "rcksum/rcksum.ae"
+static int rcksum_stat_strong_hit_p(void* z) {
+#line 230 "rcksum/rcksum.ae"
+RcksumState* s = ((RcksumState*)(z));
+#line 231 "rcksum/rcksum.ae"
+    return s->stats->strong_hit;
+}
+
+#line 233 "rcksum/rcksum.ae"
+static int rcksum_stat_checksummed_p(void* z) {
+#line 234 "rcksum/rcksum.ae"
+RcksumState* s = ((RcksumState*)(z));
+#line 235 "rcksum/rcksum.ae"
+    return s->stats->checksummed;
+}
+
+#line 239 "rcksum/rcksum.ae"
 static void rcksum_add_target_block(RcksumState* z, int b, int rsum_a, int rsum_b, const char* md4) {
 if (b < z->blocks) {
         {
-#line 223 "rcksum/rcksum.ae"
+#line 241 "rcksum/rcksum.ae"
 HashEntry* e = rcksum_entry_at(z, b);
-#line 224 "rcksum/rcksum.ae"
+#line 242 "rcksum/rcksum.ae"
 (e->md4 = md4);
-#line 225 "rcksum/rcksum.ae"
+#line 243 "rcksum/rcksum.ae"
 (e->rsum_a = (rsum_a & z->rsum_a_mask));
-#line 226 "rcksum/rcksum.ae"
+#line 244 "rcksum/rcksum.ae"
 (e->rsum_b = (rsum_b & 0xffff));
-#line 228 "rcksum/rcksum.ae"
+#line 246 "rcksum/rcksum.ae"
 (z->rsum_hash = NULL);
-#line 229 "rcksum/rcksum.ae"
+#line 247 "rcksum/rcksum.ae"
 (z->bit_hash = NULL);
         }
     }
 }
 
-#line 233 "rcksum/rcksum.ae"
+#line 251 "rcksum/rcksum.ae"
 static int rcksum_blocks_todo(RcksumState* z) {
-#line 234 "rcksum/rcksum.ae"
+#line 252 "rcksum/rcksum.ae"
     return (z->blocks - ranges_got_blocks(z->known));
 }
 
-#line 238 "rcksum/rcksum.ae"
+#line 256 "rcksum/rcksum.ae"
 static int rcksum_calc_rhash(RcksumState* z, int b) {
-#line 239 "rcksum/rcksum.ae"
+#line 257 "rcksum/rcksum.ae"
 HashEntry* e1 = rcksum_entry_at(z, b);
-#line 240 "rcksum/rcksum.ae"
+#line 258 "rcksum/rcksum.ae"
 RSum* rs1 = checksums_new_rsum(e1->rsum_a, e1->rsum_b);
 if (z->seq_matches > 1) {
         {
-#line 242 "rcksum/rcksum.ae"
+#line 260 "rcksum/rcksum.ae"
 HashEntry* e2 = rcksum_entry_at(z, (b + 1));
-#line 243 "rcksum/rcksum.ae"
+#line 261 "rcksum/rcksum.ae"
 RSum* rs2 = checksums_new_rsum(e2->rsum_a, e2->rsum_b);
-#line 244 "rcksum/rcksum.ae"
+#line 262 "rcksum/rcksum.ae"
             return checksums_calc_rhash_from_rsums(rs1, rs2, z->seq_matches, z->rsum_a_mask);
         }
     }
-#line 246 "rcksum/rcksum.ae"
+#line 264 "rcksum/rcksum.ae"
     return checksums_calc_rhash_from_rsums(rs1, rs1, z->seq_matches, z->rsum_a_mask);
 }
 
-#line 250 "rcksum/rcksum.ae"
+#line 268 "rcksum/rcksum.ae"
 static const char* rcksum_hkey(int h) {
-#line 251 "rcksum/rcksum.ae"
+#line 269 "rcksum/rcksum.ae"
     return aether_uniform_heap_str((const char*)(string_from_int((h & 0xffffffff))), 1);
 }
 
-#line 254 "rcksum/rcksum.ae"
+#line 272 "rcksum/rcksum.ae"
 static int rcksum_rsum_hash_get(RcksumState* z, int h) {
-#line 255 "rcksum/rcksum.ae"
-void* v = ({ const char* _ad_9 = (const char*)(rcksum_hkey(h)); void* _ad_r = map_get_raw(z->rsum_hash, aether_string_data(_ad_9)); aether_heap_str_free(_ad_9); _ad_r; });
+#line 273 "rcksum/rcksum.ae"
+void* v = ({ const char* _ad_13 = (const char*)(rcksum_hkey(h)); void* _ad_r = map_get_raw(z->rsum_hash, aether_string_data(_ad_13)); aether_heap_str_free(_ad_13); _ad_r; });
 if (v == NULL) {
         {
-#line 257 "rcksum/rcksum.ae"
+#line 275 "rcksum/rcksum.ae"
             return rcksum_NO_BLOCK();
         }
     }
-#line 259 "rcksum/rcksum.ae"
+#line 277 "rcksum/rcksum.ae"
     return (rcksum_unbox_int(v) - 1);
 }
 
-#line 262 "rcksum/rcksum.ae"
+#line 280 "rcksum/rcksum.ae"
 static void rcksum_rsum_hash_put(RcksumState* z, int h, int id) {
-#line 263 "rcksum/rcksum.ae"
-({ const char* _ad_10 = (const char*)(rcksum_hkey(h)); int _ad_r = map_put_raw(z->rsum_hash, aether_string_data(_ad_10), rcksum_box_int((id + 1))); aether_heap_str_free(_ad_10); _ad_r; });
+#line 281 "rcksum/rcksum.ae"
+({ const char* _ad_14 = (const char*)(rcksum_hkey(h)); int _ad_r = map_put_raw(z->rsum_hash, aether_string_data(_ad_14), rcksum_box_int((id + 1))); aether_heap_str_free(_ad_14); _ad_r; });
 }
 
-#line 266 "rcksum/rcksum.ae"
+#line 284 "rcksum/rcksum.ae"
 static void rcksum_rsum_hash_del(RcksumState* z, int h) {
-#line 267 "rcksum/rcksum.ae"
+#line 285 "rcksum/rcksum.ae"
 map_remove(z->rsum_hash, aether_string_data(rcksum_hkey(h)));
 }
 
-#line 271 "rcksum/rcksum.ae"
+#line 289 "rcksum/rcksum.ae"
 static void rcksum_build_hash(RcksumState* z) {
-#line 272 "rcksum/rcksum.ae"
+#line 290 "rcksum/rcksum.ae"
 (z->rsum_hash = map_new());
-#line 274 "rcksum/rcksum.ae"
+#line 292 "rcksum/rcksum.ae"
 int bit_hash_bits = (checksums_log2(z->blocks) + rcksum_BITHASH_BITS());
-#line 275 "rcksum/rcksum.ae"
+#line 293 "rcksum/rcksum.ae"
 (z->bit_hash_mask = ((1 << bit_hash_bits) - 1));
-#line 276 "rcksum/rcksum.ae"
+#line 294 "rcksum/rcksum.ae"
 (z->bit_hash_len = (((z->bit_hash_mask + 1) + 7) >> 3));
-#line 277 "rcksum/rcksum.ae"
+#line 295 "rcksum/rcksum.ae"
 (z->bit_hash = fileio_buf_alloc(z->bit_hash_len));
-#line 280 "rcksum/rcksum.ae"
+#line 298 "rcksum/rcksum.ae"
 int id = (z->blocks - z->seq_matches);
     int h;
     int nxt;
@@ -3084,64 +3293,64 @@ int id = (z->blocks - z->seq_matches);
     int bit_pos;
 while (id >= 0) {
         {
-#line 282 "rcksum/rcksum.ae"
+#line 300 "rcksum/rcksum.ae"
 h = rcksum_calc_rhash(z, id);
-#line 283 "rcksum/rcksum.ae"
+#line 301 "rcksum/rcksum.ae"
 nxt = rcksum_rsum_hash_get(z, h);
-#line 284 "rcksum/rcksum.ae"
+#line 302 "rcksum/rcksum.ae"
 e = rcksum_entry_at(z, id);
-#line 285 "rcksum/rcksum.ae"
+#line 303 "rcksum/rcksum.ae"
 (e->next = nxt);
-#line 286 "rcksum/rcksum.ae"
+#line 304 "rcksum/rcksum.ae"
 rcksum_rsum_hash_put(z, h, id);
-#line 288 "rcksum/rcksum.ae"
+#line 306 "rcksum/rcksum.ae"
 bit_idx = ((h & z->bit_hash_mask) >> 3);
-#line 289 "rcksum/rcksum.ae"
+#line 307 "rcksum/rcksum.ae"
 bit_pos = (h & 7);
 if (bit_idx < z->bit_hash_len) {
                 {
-#line 291 "rcksum/rcksum.ae"
+#line 309 "rcksum/rcksum.ae"
 fileio_buf_or(z->bit_hash, bit_idx, (1 << bit_pos));
                 }
             }
-#line 293 "rcksum/rcksum.ae"
+#line 311 "rcksum/rcksum.ae"
 id = (id - 1);
         }
     }
 }
 
-#line 298 "rcksum/rcksum.ae"
+#line 316 "rcksum/rcksum.ae"
 static void rcksum_remove_block_from_hash(RcksumState* z, int id) {
 if (z->rsum_hash == NULL) {
         {
-#line 300 "rcksum/rcksum.ae"
+#line 318 "rcksum/rcksum.ae"
             return;
         }
     }
 if (id >= (z->blocks - (z->seq_matches - 1))) {
         {
-#line 303 "rcksum/rcksum.ae"
+#line 321 "rcksum/rcksum.ae"
             return;
         }
     }
-#line 305 "rcksum/rcksum.ae"
+#line 323 "rcksum/rcksum.ae"
 int h = rcksum_calc_rhash(z, id);
-#line 306 "rcksum/rcksum.ae"
+#line 324 "rcksum/rcksum.ae"
 int p = rcksum_rsum_hash_get(z, h);
 if (p == id) {
         {
-#line 308 "rcksum/rcksum.ae"
+#line 326 "rcksum/rcksum.ae"
 HashEntry* e = rcksum_entry_at(z, id);
-#line 309 "rcksum/rcksum.ae"
+#line 327 "rcksum/rcksum.ae"
 int nxt = e->next;
 if (nxt != rcksum_NO_BLOCK()) {
                 {
-#line 311 "rcksum/rcksum.ae"
+#line 329 "rcksum/rcksum.ae"
 rcksum_rsum_hash_put(z, h, nxt);
                 }
             } else {
                 {
-#line 313 "rcksum/rcksum.ae"
+#line 331 "rcksum/rcksum.ae"
 rcksum_rsum_hash_del(z, h);
                 }
             }
@@ -3152,18 +3361,18 @@ if (p != rcksum_NO_BLOCK()) {
                 HashEntry* pe;
 while (p != rcksum_NO_BLOCK()) {
                     {
-#line 317 "rcksum/rcksum.ae"
+#line 335 "rcksum/rcksum.ae"
 pe = rcksum_entry_at(z, p);
 if (pe->next == id) {
                             {
-#line 319 "rcksum/rcksum.ae"
+#line 337 "rcksum/rcksum.ae"
 (pe->next = rcksum_entry_at(z, id)->next);
-#line 320 "rcksum/rcksum.ae"
+#line 338 "rcksum/rcksum.ae"
 p = rcksum_NO_BLOCK();
                             }
                         } else {
                             {
-#line 322 "rcksum/rcksum.ae"
+#line 340 "rcksum/rcksum.ae"
 p = pe->next;
                             }
                         }
@@ -3172,80 +3381,80 @@ p = pe->next;
             }
         }
     }
-#line 326 "rcksum/rcksum.ae"
+#line 344 "rcksum/rcksum.ae"
 (rcksum_entry_at(z, id)->next = rcksum_NO_BLOCK());
 }
 
-#line 330 "rcksum/rcksum.ae"
+#line 348 "rcksum/rcksum.ae"
 static void* rcksum_needed_block_ranges(RcksumState* z) {
-#line 331 "rcksum/rcksum.ae"
+#line 349 "rcksum/rcksum.ae"
     return ranges_missing_blocks_between(z->known, 0, (z->blocks - 1));
 }
 
-#line 340 "rcksum/rcksum.ae"
+#line 358 "rcksum/rcksum.ae"
 static int rcksum_prefix_eq(const char* a, int a_len, const char* b, int b_len, int n) {
-#line 341 "rcksum/rcksum.ae"
+#line 359 "rcksum/rcksum.ae"
 int i = 0;
     int ca;
     int cb;
 while (i < n) {
         {
-#line 343 "rcksum/rcksum.ae"
+#line 361 "rcksum/rcksum.ae"
 ca = (string_char_at_n(a, a_len, i) & 0xff);
-#line 344 "rcksum/rcksum.ae"
+#line 362 "rcksum/rcksum.ae"
 cb = (string_char_at_n(b, b_len, i) & 0xff);
 if (ca != cb) {
                 {
-#line 346 "rcksum/rcksum.ae"
+#line 364 "rcksum/rcksum.ae"
                     return 0;
                 }
             }
-#line 348 "rcksum/rcksum.ae"
+#line 366 "rcksum/rcksum.ae"
 i = (i + 1);
         }
     }
-#line 350 "rcksum/rcksum.ae"
+#line 368 "rcksum/rcksum.ae"
     return 1;
 }
 
-#line 358 "rcksum/rcksum.ae"
+#line 376 "rcksum/rcksum.ae"
 static int rcksum_write_blocks(RcksumState* z, const char* data, int data_len, int bfrom, int bto, int next) {
-#line 359 "rcksum/rcksum.ae"
+#line 377 "rcksum/rcksum.ae"
 int span = (((bto + 1) - bfrom) << z->block_shift);
-#line 360 "rcksum/rcksum.ae"
+#line 378 "rcksum/rcksum.ae"
 int offset = (bfrom << z->block_shift);
-#line 361 "rcksum/rcksum.ae"
+#line 379 "rcksum/rcksum.ae"
 fileio_write_at(z->fd, data, span, offset);
-#line 363 "rcksum/rcksum.ae"
+#line 381 "rcksum/rcksum.ae"
 int id = bfrom;
 while (id <= bto) {
         {
 if (id == next) {
                 {
-#line 366 "rcksum/rcksum.ae"
+#line 384 "rcksum/rcksum.ae"
 next = rcksum_entry_at(z, id)->next;
                 }
             }
-#line 368 "rcksum/rcksum.ae"
+#line 386 "rcksum/rcksum.ae"
 ranges_add_to_ranges(z->known, id);
 if (z->seq_matches == 2) {
                 {
 if (id != bto) {
                         {
-#line 371 "rcksum/rcksum.ae"
+#line 389 "rcksum/rcksum.ae"
 rcksum_remove_block_from_hash(z, id);
                         }
                     } else {
 if (ranges_contains(z->known, (bto + 1)) == 1) {
                             {
-#line 373 "rcksum/rcksum.ae"
+#line 391 "rcksum/rcksum.ae"
 rcksum_remove_block_from_hash(z, id);
                             }
                         }
                     }
                 }
             }
-#line 376 "rcksum/rcksum.ae"
+#line 394 "rcksum/rcksum.ae"
 id = (id + 1);
         }
     }
@@ -3255,7 +3464,7 @@ if (bfrom > 0) {
                 {
 if (ranges_contains(z->known, (bfrom - 1)) == 1) {
                         {
-#line 381 "rcksum/rcksum.ae"
+#line 399 "rcksum/rcksum.ae"
 rcksum_remove_block_from_hash(z, (bfrom - 1));
                         }
                     }
@@ -3263,11 +3472,11 @@ rcksum_remove_block_from_hash(z, (bfrom - 1));
             }
         }
     }
-#line 385 "rcksum/rcksum.ae"
+#line 403 "rcksum/rcksum.ae"
     return next;
 }
 
-#line 391 "rcksum/rcksum.ae"
+#line 409 "rcksum/rcksum.ae"
 static void rcksum_submit_blocks(RcksumState* z, const char* data, int data_len, int bfrom, int bto) {
     int _heap_block = 0; (void)_heap_block;
     const char* block = NULL;
@@ -3279,40 +3488,40 @@ static void rcksum_submit_blocks(RcksumState* z, const char* data, int data_len,
     const char* prefix = NULL;
 if (z->rsum_hash == NULL) {
         {
-#line 393 "rcksum/rcksum.ae"
+#line 411 "rcksum/rcksum.ae"
 rcksum_build_hash(z);
         }
     }
-#line 395 "rcksum/rcksum.ae"
+#line 413 "rcksum/rcksum.ae"
 int x = bfrom;
     int off;
 while (x <= bto) {
         {
-#line 397 "rcksum/rcksum.ae"
+#line 415 "rcksum/rcksum.ae"
 off = ((x - bfrom) << z->block_shift);
-#line 398 "rcksum/rcksum.ae"
+#line 416 "rcksum/rcksum.ae"
 { const char* _tmp_old = block; block = fileio_slice(data, data_len, off, z->block_size); if (_heap_block) aether_heap_str_free(_tmp_old); _heap_block = 1; }
-#line 399 "rcksum/rcksum.ae"
+#line 417 "rcksum/rcksum.ae"
 { const char* _tmp_old = md; md = checksums_calc_checksum(block, z->block_size); if (_heap_md) aether_heap_str_free(_tmp_old); _heap_md = 0; }
-#line 400 "rcksum/rcksum.ae"
+#line 418 "rcksum/rcksum.ae"
 { const char* _tmp_old = stored; stored = rcksum_entry_at(z, x)->md4; if (_heap_stored) aether_heap_str_free(_tmp_old); _heap_stored = 0; }
 if (rcksum_prefix_eq(md, 16, stored, 16, z->checksum_bytes) == 0) {
                 {
-#line 402 "rcksum/rcksum.ae"
+#line 420 "rcksum/rcksum.ae"
                     break;
                 }
             }
-#line 404 "rcksum/rcksum.ae"
+#line 422 "rcksum/rcksum.ae"
 x = (x + 1);
         }
     }
 if (x > bfrom) {
         {
-#line 409 "rcksum/rcksum.ae"
+#line 427 "rcksum/rcksum.ae"
 int span_len = ((x - bfrom) << z->block_shift);
-#line 410 "rcksum/rcksum.ae"
+#line 428 "rcksum/rcksum.ae"
 { const char* _tmp_old = prefix; prefix = fileio_slice(data, data_len, 0, span_len); if (_heap_prefix) aether_heap_str_free(_tmp_old); _heap_prefix = 1; }
-#line 411 "rcksum/rcksum.ae"
+#line 429 "rcksum/rcksum.ae"
 rcksum_write_blocks(z, prefix, span_len, bfrom, (x - 1), rcksum_NO_BLOCK());
         }
     }
@@ -3322,47 +3531,47 @@ rcksum_write_blocks(z, prefix, span_len, bfrom, (x - 1), rcksum_NO_BLOCK());
     /* deferred */ if (_heap_block) { aether_heap_str_free(block); block = NULL; _heap_block = 0; }
 }
 
-#line 418 "rcksum/rcksum.ae"
+#line 436 "rcksum/rcksum.ae"
 static int rcksum_match_block(RcksumState* z, const char* data, int data_len, int doff) {
-#line 419 "rcksum/rcksum.ae"
+#line 437 "rcksum/rcksum.ae"
 int h = checksums_calc_rhash_from_rsums(z->r0, z->r1, z->seq_matches, z->rsum_a_mask);
-#line 421 "rcksum/rcksum.ae"
+#line 439 "rcksum/rcksum.ae"
 int bit_idx = ((h & z->bit_hash_mask) >> 3);
-#line 422 "rcksum/rcksum.ae"
+#line 440 "rcksum/rcksum.ae"
 int bit_pos = (h & 7);
 if (z->bit_hash == NULL) {
         {
-#line 424 "rcksum/rcksum.ae"
+#line 442 "rcksum/rcksum.ae"
             return 0;
         }
     }
 if (bit_idx >= z->bit_hash_len) {
         {
-#line 427 "rcksum/rcksum.ae"
+#line 445 "rcksum/rcksum.ae"
             return 0;
         }
     }
-#line 429 "rcksum/rcksum.ae"
+#line 447 "rcksum/rcksum.ae"
 int bv = fileio_buf_get(z->bit_hash, bit_idx);
 if ((bv & (1 << bit_pos)) == 0) {
         {
-#line 431 "rcksum/rcksum.ae"
+#line 449 "rcksum/rcksum.ae"
             return 0;
         }
     }
-#line 433 "rcksum/rcksum.ae"
+#line 451 "rcksum/rcksum.ae"
 int e = rcksum_rsum_hash_get(z, h);
 if (e == rcksum_NO_BLOCK()) {
         {
-#line 435 "rcksum/rcksum.ae"
+#line 453 "rcksum/rcksum.ae"
             return 0;
         }
     }
-#line 437 "rcksum/rcksum.ae"
+#line 455 "rcksum/rcksum.ae"
     return rcksum_check_chain(z, e, data, data_len, doff);
 }
 
-#line 443 "rcksum/rcksum.ae"
+#line 461 "rcksum/rcksum.ae"
 static int rcksum_check_chain(RcksumState* z, int id, const char* data, int data_len, int doff) {
     int _heap_md_cache0 = 0; (void)_heap_md_cache0;
     const char* md_cache0 = NULL;
@@ -3378,15 +3587,15 @@ static int rcksum_check_chain(RcksumState* z, int id, const char* data, int data
     const char* stored = NULL;
     int _heap_prefix = 0; (void)_heap_prefix;
     const char* prefix = NULL;
-#line 444 "rcksum/rcksum.ae"
+#line 462 "rcksum/rcksum.ae"
 int got = 0;
-#line 446 "rcksum/rcksum.ae"
+#line 464 "rcksum/rcksum.ae"
 { const char* _tmp_old = md_cache0; md_cache0 = ""; if (_heap_md_cache0) aether_heap_str_free(_tmp_old); _heap_md_cache0 = 0; }
-#line 447 "rcksum/rcksum.ae"
+#line 465 "rcksum/rcksum.ae"
 { const char* _tmp_old = md_cache1; md_cache1 = ""; if (_heap_md_cache1) aether_heap_str_free(_tmp_old); _heap_md_cache1 = 0; }
-#line 448 "rcksum/rcksum.ae"
+#line 466 "rcksum/rcksum.ae"
 int cached = 0;
-#line 450 "rcksum/rcksum.ae"
+#line 468 "rcksum/rcksum.ae"
 int next = id;
     HashEntry* e0;
     HashEntry* e1;
@@ -3398,143 +3607,143 @@ int next = id;
     int span_len;
 while (next != rcksum_NO_BLOCK()) {
         {
-#line 452 "rcksum/rcksum.ae"
+#line 470 "rcksum/rcksum.ae"
 id = next;
-#line 453 "rcksum/rcksum.ae"
+#line 471 "rcksum/rcksum.ae"
 next = rcksum_entry_at(z, id)->next;
-#line 455 "rcksum/rcksum.ae"
+#line 473 "rcksum/rcksum.ae"
 (z->stats->hash_hit = (z->stats->hash_hit + 1));
-#line 456 "rcksum/rcksum.ae"
+#line 474 "rcksum/rcksum.ae"
 e0 = rcksum_entry_at(z, id);
 if (e0->rsum_a != (checksums_rsum_a(z->r0) & z->rsum_a_mask)) {
                 {
-#line 458 "rcksum/rcksum.ae"
+#line 476 "rcksum/rcksum.ae"
                     continue;
                 }
             }
 if (e0->rsum_b != checksums_rsum_b(z->r0)) {
                 {
-#line 461 "rcksum/rcksum.ae"
+#line 479 "rcksum/rcksum.ae"
                     continue;
                 }
             }
 if (z->seq_matches > 1) {
                 {
-#line 464 "rcksum/rcksum.ae"
+#line 482 "rcksum/rcksum.ae"
 e1 = rcksum_entry_at(z, (id + 1));
 if (e1->rsum_a != (checksums_rsum_a(z->r1) & z->rsum_a_mask)) {
                         {
-#line 466 "rcksum/rcksum.ae"
+#line 484 "rcksum/rcksum.ae"
                             continue;
                         }
                     }
 if (e1->rsum_b != checksums_rsum_b(z->r1)) {
                         {
-#line 469 "rcksum/rcksum.ae"
+#line 487 "rcksum/rcksum.ae"
                             continue;
                         }
                     }
                 }
             }
-#line 472 "rcksum/rcksum.ae"
+#line 490 "rcksum/rcksum.ae"
 (z->stats->weak_hit = (z->stats->weak_hit + 1));
-#line 475 "rcksum/rcksum.ae"
+#line 493 "rcksum/rcksum.ae"
 matching = 0;
-#line 476 "rcksum/rcksum.ae"
+#line 494 "rcksum/rcksum.ae"
 checkmd4 = 0;
 while (checkmd4 < z->seq_matches) {
                 {
 if (checkmd4 >= cached) {
                         {
-#line 479 "rcksum/rcksum.ae"
+#line 497 "rcksum/rcksum.ae"
 boff = (doff + (checkmd4 * z->block_size));
 if ((boff + z->block_size) > data_len) {
                                 {
-#line 481 "rcksum/rcksum.ae"
+#line 499 "rcksum/rcksum.ae"
                                     break;
                                 }
                             }
-#line 483 "rcksum/rcksum.ae"
+#line 501 "rcksum/rcksum.ae"
 { const char* _tmp_old = block; block = fileio_slice(data, data_len, boff, z->block_size); if (_heap_block) aether_heap_str_free(_tmp_old); _heap_block = 1; }
-#line 484 "rcksum/rcksum.ae"
+#line 502 "rcksum/rcksum.ae"
 { const char* _tmp_old = md; md = checksums_calc_checksum(block, z->block_size); if (_heap_md) aether_heap_str_free(_tmp_old); _heap_md = 0; }
 if (checkmd4 == 0) {
                                 {
-#line 486 "rcksum/rcksum.ae"
+#line 504 "rcksum/rcksum.ae"
 { const char* _tmp_old = md_cache0; md_cache0 = aether_uniform_heap_str(md, 0); if (_heap_md_cache0) aether_heap_str_free(_tmp_old); _heap_md_cache0 = 1; }
                                 }
                             } else {
                                 {
-#line 488 "rcksum/rcksum.ae"
+#line 506 "rcksum/rcksum.ae"
 { const char* _tmp_old = md_cache1; md_cache1 = aether_uniform_heap_str(md, 0); if (_heap_md_cache1) aether_heap_str_free(_tmp_old); _heap_md_cache1 = 1; }
                                 }
                             }
-#line 490 "rcksum/rcksum.ae"
+#line 508 "rcksum/rcksum.ae"
 cached = (cached + 1);
-#line 491 "rcksum/rcksum.ae"
+#line 509 "rcksum/rcksum.ae"
 (z->stats->checksummed = (z->stats->checksummed + 1));
                         }
                     }
-#line 493 "rcksum/rcksum.ae"
+#line 511 "rcksum/rcksum.ae"
 { const char* _tmp_old = cand; cand = md_cache0; if (_heap_cand) aether_heap_str_free(_tmp_old); _heap_cand = _heap_md_cache0; _heap_md_cache0 = 0; }
 if (checkmd4 == 1) {
                         {
-#line 495 "rcksum/rcksum.ae"
+#line 513 "rcksum/rcksum.ae"
 { const char* _tmp_old = cand; cand = md_cache1; if (_heap_cand) aether_heap_str_free(_tmp_old); _heap_cand = _heap_md_cache1; _heap_md_cache1 = 0; }
                         }
                     }
-#line 497 "rcksum/rcksum.ae"
+#line 515 "rcksum/rcksum.ae"
 { const char* _tmp_old = stored; stored = rcksum_entry_at(z, (id + checkmd4))->md4; if (_heap_stored) aether_heap_str_free(_tmp_old); _heap_stored = 0; }
 if (rcksum_prefix_eq(cand, 16, stored, 16, z->checksum_bytes) == 1) {
                         {
-#line 499 "rcksum/rcksum.ae"
+#line 517 "rcksum/rcksum.ae"
 matching = (matching + 1);
                         }
                     } else {
                         {
-#line 501 "rcksum/rcksum.ae"
+#line 519 "rcksum/rcksum.ae"
                             break;
                         }
                     }
-#line 503 "rcksum/rcksum.ae"
+#line 521 "rcksum/rcksum.ae"
 checkmd4 = (checkmd4 + 1);
                 }
             }
 if (matching < z->seq_matches) {
                 {
-#line 507 "rcksum/rcksum.ae"
+#line 525 "rcksum/rcksum.ae"
                     continue;
                 }
             }
-#line 510 "rcksum/rcksum.ae"
+#line 528 "rcksum/rcksum.ae"
 (z->stats->strong_hit = (z->stats->strong_hit + matching));
-#line 511 "rcksum/rcksum.ae"
+#line 529 "rcksum/rcksum.ae"
 next_known = ranges_next_contained_after(z->known, id);
 if (next_known == (-(1))) {
                 {
-#line 513 "rcksum/rcksum.ae"
+#line 531 "rcksum/rcksum.ae"
 next_known = z->blocks;
                 }
             }
-#line 515 "rcksum/rcksum.ae"
+#line 533 "rcksum/rcksum.ae"
 num_write = matching;
 if (next_known < (id + matching)) {
                 {
-#line 517 "rcksum/rcksum.ae"
+#line 535 "rcksum/rcksum.ae"
 num_write = (next_known - id);
                 }
             }
-#line 520 "rcksum/rcksum.ae"
+#line 538 "rcksum/rcksum.ae"
 span_len = (num_write * z->block_size);
-#line 521 "rcksum/rcksum.ae"
+#line 539 "rcksum/rcksum.ae"
 { const char* _tmp_old = prefix; prefix = fileio_slice(data, data_len, doff, span_len); if (_heap_prefix) aether_heap_str_free(_tmp_old); _heap_prefix = 1; }
-#line 522 "rcksum/rcksum.ae"
+#line 540 "rcksum/rcksum.ae"
 next = rcksum_write_blocks(z, prefix, span_len, id, ((id + num_write) - 1), next);
-#line 523 "rcksum/rcksum.ae"
+#line 541 "rcksum/rcksum.ae"
 got = (got + num_write);
         }
     }
-#line 525 "rcksum/rcksum.ae"
+#line 543 "rcksum/rcksum.ae"
     int _builder_ret = got;
     /* deferred */ if (_heap_prefix) { aether_heap_str_free(prefix); prefix = NULL; _heap_prefix = 0; }
     /* deferred */ if (_heap_stored) { aether_heap_str_free(stored); stored = NULL; _heap_stored = 0; }
@@ -3553,29 +3762,29 @@ got = (got + num_write);
     /* deferred */ if (_heap_md_cache0) { aether_heap_str_free(md_cache0); md_cache0 = NULL; _heap_md_cache0 = 0; }
 }
 
-#line 531 "rcksum/rcksum.ae"
+#line 549 "rcksum/rcksum.ae"
 static int rcksum_submit_source_data(RcksumState* z, const char* data, int data_len, int offset) {
-#line 532 "rcksum/rcksum.ae"
+#line 550 "rcksum/rcksum.ae"
 int x = 0;
-#line 533 "rcksum/rcksum.ae"
+#line 551 "rcksum/rcksum.ae"
 int got = 0;
-#line 534 "rcksum/rcksum.ae"
+#line 552 "rcksum/rcksum.ae"
 int x_limit = (data_len - z->context);
 if (offset != 0) {
         {
-#line 537 "rcksum/rcksum.ae"
+#line 555 "rcksum/rcksum.ae"
 x = z->skip;
         }
     }
-#line 539 "rcksum/rcksum.ae"
+#line 557 "rcksum/rcksum.ae"
 (z->skip = 0);
 if (x != 0) {
         {
-#line 542 "rcksum/rcksum.ae"
+#line 560 "rcksum/rcksum.ae"
 (z->r0 = checksums_rsum_as_ptr(checksums_calc_rsum_block(data, data_len, x, z->block_size)));
 if (z->seq_matches > 1) {
                 {
-#line 544 "rcksum/rcksum.ae"
+#line 562 "rcksum/rcksum.ae"
 (z->r1 = checksums_rsum_as_ptr(checksums_calc_rsum_block(data, data_len, (x + z->block_size), z->block_size)));
                 }
             }
@@ -3583,11 +3792,11 @@ if (z->seq_matches > 1) {
     } else {
 if (offset == 0) {
             {
-#line 547 "rcksum/rcksum.ae"
+#line 565 "rcksum/rcksum.ae"
 (z->r0 = checksums_rsum_as_ptr(checksums_calc_rsum_block(data, data_len, x, z->block_size)));
 if (z->seq_matches > 1) {
                     {
-#line 549 "rcksum/rcksum.ae"
+#line 567 "rcksum/rcksum.ae"
 (z->r1 = checksums_rsum_as_ptr(checksums_calc_rsum_block(data, data_len, (x + z->block_size), z->block_size)));
                     }
                 }
@@ -3602,23 +3811,23 @@ if (z->seq_matches > 1) {
     int new1;
 while (x < x_limit) {
         {
-#line 554 "rcksum/rcksum.ae"
+#line 572 "rcksum/rcksum.ae"
 blocks_matched = 0;
 while (blocks_matched == 0) {
                 {
 if (x >= x_limit) {
                         {
-#line 557 "rcksum/rcksum.ae"
+#line 575 "rcksum/rcksum.ae"
                             break;
                         }
                     }
-#line 559 "rcksum/rcksum.ae"
+#line 577 "rcksum/rcksum.ae"
 thismatch = rcksum_match_block(z, data, data_len, x);
 if (thismatch > 0) {
                         {
-#line 561 "rcksum/rcksum.ae"
+#line 579 "rcksum/rcksum.ae"
 blocks_matched = z->seq_matches;
-#line 562 "rcksum/rcksum.ae"
+#line 580 "rcksum/rcksum.ae"
 got = (got + thismatch);
                         }
                     }
@@ -3626,25 +3835,25 @@ if (blocks_matched == 0) {
                         {
 if ((x + (z->block_size * z->seq_matches)) < data_len) {
                                 {
-#line 566 "rcksum/rcksum.ae"
+#line 584 "rcksum/rcksum.ae"
 old_c = (string_char_at_n(data, data_len, x) & 0xff);
-#line 567 "rcksum/rcksum.ae"
+#line 585 "rcksum/rcksum.ae"
 new_c = (string_char_at_n(data, data_len, (x + z->block_size)) & 0xff);
-#line 568 "rcksum/rcksum.ae"
+#line 586 "rcksum/rcksum.ae"
 checksums_update_rsum(z->r0, old_c, new_c, z->block_shift);
 if (z->seq_matches > 1) {
                                         {
-#line 570 "rcksum/rcksum.ae"
+#line 588 "rcksum/rcksum.ae"
 old1 = (string_char_at_n(data, data_len, (x + z->block_size)) & 0xff);
-#line 571 "rcksum/rcksum.ae"
+#line 589 "rcksum/rcksum.ae"
 new1 = (string_char_at_n(data, data_len, (x + (2 * z->block_size))) & 0xff);
-#line 572 "rcksum/rcksum.ae"
+#line 590 "rcksum/rcksum.ae"
 checksums_update_rsum(z->r1, old1, new1, z->block_shift);
                                         }
                                     }
                                 }
                             }
-#line 575 "rcksum/rcksum.ae"
+#line 593 "rcksum/rcksum.ae"
 x = (x + 1);
                         }
                     }
@@ -3652,7 +3861,7 @@ x = (x + 1);
             }
 if (blocks_matched > 0) {
                 {
-#line 580 "rcksum/rcksum.ae"
+#line 598 "rcksum/rcksum.ae"
 x = (x + (z->block_size * blocks_matched));
 if (x <= x_limit) {
                         {
@@ -3660,13 +3869,13 @@ if (z->seq_matches > 1) {
                                 {
 if (blocks_matched == 1) {
                                         {
-#line 584 "rcksum/rcksum.ae"
+#line 602 "rcksum/rcksum.ae"
 (z->r0 = z->r1);
                                         }
                                     } else {
 if ((x + z->block_size) <= data_len) {
                                             {
-#line 586 "rcksum/rcksum.ae"
+#line 604 "rcksum/rcksum.ae"
 (z->r0 = checksums_rsum_as_ptr(checksums_calc_rsum_block(data, data_len, x, z->block_size)));
                                             }
                                         }
@@ -3675,7 +3884,7 @@ if ((x + z->block_size) <= data_len) {
                             } else {
 if ((x + z->block_size) <= data_len) {
                                     {
-#line 589 "rcksum/rcksum.ae"
+#line 607 "rcksum/rcksum.ae"
 (z->r0 = checksums_rsum_as_ptr(checksums_calc_rsum_block(data, data_len, x, z->block_size)));
                                     }
                                 }
@@ -3684,7 +3893,7 @@ if (z->seq_matches > 1) {
                                 {
 if ((x + (2 * z->block_size)) <= data_len) {
                                         {
-#line 593 "rcksum/rcksum.ae"
+#line 611 "rcksum/rcksum.ae"
 (z->r1 = checksums_rsum_as_ptr(checksums_calc_rsum_block(data, data_len, (x + z->block_size), z->block_size)));
                                         }
                                     }
@@ -3696,13 +3905,13 @@ if ((x + (2 * z->block_size)) <= data_len) {
             }
         }
     }
-#line 600 "rcksum/rcksum.ae"
+#line 618 "rcksum/rcksum.ae"
 (z->skip = (x - x_limit));
-#line 601 "rcksum/rcksum.ae"
+#line 619 "rcksum/rcksum.ae"
     return got;
 }
 
-#line 611 "rcksum/rcksum.ae"
+#line 629 "rcksum/rcksum.ae"
 static int rcksum_submit_source_buffer(RcksumState* z, const char* data, int data_len) {
     int _heap_padded = 0; (void)_heap_padded;
     const char* padded = NULL;
@@ -3710,37 +3919,37 @@ static int rcksum_submit_source_buffer(RcksumState* z, const char* data, int dat
     const char* zeros = NULL;
 if (z->rsum_hash == NULL) {
         {
-#line 613 "rcksum/rcksum.ae"
+#line 631 "rcksum/rcksum.ae"
 rcksum_build_hash(z);
         }
     }
-#line 615 "rcksum/rcksum.ae"
+#line 633 "rcksum/rcksum.ae"
 int buf_size = (z->block_size * 16);
-#line 619 "rcksum/rcksum.ae"
+#line 637 "rcksum/rcksum.ae"
 int eff = data_len;
 if (data_len < buf_size) {
         {
-#line 621 "rcksum/rcksum.ae"
+#line 639 "rcksum/rcksum.ae"
 eff = (data_len + z->context);
 if (eff > buf_size) {
                 {
-#line 623 "rcksum/rcksum.ae"
+#line 641 "rcksum/rcksum.ae"
 eff = buf_size;
                 }
             }
         }
     }
-#line 627 "rcksum/rcksum.ae"
+#line 645 "rcksum/rcksum.ae"
 { const char* _tmp_old = padded; padded = data; if (_heap_padded) aether_heap_str_free(_tmp_old); _heap_padded = 0; }
 if (eff > data_len) {
         {
-#line 629 "rcksum/rcksum.ae"
+#line 647 "rcksum/rcksum.ae"
 { const char* _tmp_old = zeros; zeros = rcksum_make_zeros((eff - data_len)); if (_heap_zeros) aether_heap_str_free(_tmp_old); _heap_zeros = 1; }
-#line 630 "rcksum/rcksum.ae"
+#line 648 "rcksum/rcksum.ae"
 { const char* _tmp_old = padded; padded = rcksum_append_bytes(data, data_len, zeros, (eff - data_len)); if (_heap_padded) aether_heap_str_free(_tmp_old); _heap_padded = 1; }
         }
     }
-#line 632 "rcksum/rcksum.ae"
+#line 650 "rcksum/rcksum.ae"
     int _builder_ret = rcksum_submit_source_data(z, padded, eff, 0);
     /* deferred */ if (_heap_zeros) { aether_heap_str_free(zeros); zeros = NULL; _heap_zeros = 0; }
     /* deferred */ if (_heap_padded) { aether_heap_str_free(padded); padded = NULL; _heap_padded = 0; }
@@ -3749,51 +3958,51 @@ if (eff > data_len) {
     /* deferred */ if (_heap_padded) { aether_heap_str_free(padded); padded = NULL; _heap_padded = 0; }
 }
 
-#line 636 "rcksum/rcksum.ae"
+#line 654 "rcksum/rcksum.ae"
 static const char* rcksum_make_zeros(int n) {
-#line 637 "rcksum/rcksum.ae"
+#line 655 "rcksum/rcksum.ae"
     return aether_uniform_heap_str((const char*)(fileio_buf_alloc_str(n)), 1);
 }
 
-#line 642 "rcksum/rcksum.ae"
+#line 660 "rcksum/rcksum.ae"
 static const char* rcksum_append_bytes(const char* a, int a_len, const char* b, int b_len) {
-#line 643 "rcksum/rcksum.ae"
+#line 661 "rcksum/rcksum.ae"
 int total = (a_len + b_len);
-#line 644 "rcksum/rcksum.ae"
+#line 662 "rcksum/rcksum.ae"
 void* out = fileio_buf_alloc(total);
-#line 645 "rcksum/rcksum.ae"
+#line 663 "rcksum/rcksum.ae"
 int i = 0;
 while (i < a_len) {
         {
-#line 647 "rcksum/rcksum.ae"
+#line 665 "rcksum/rcksum.ae"
 fileio_buf_set(out, i, (string_char_at_n(a, a_len, i) & 0xff));
-#line 648 "rcksum/rcksum.ae"
+#line 666 "rcksum/rcksum.ae"
 i = (i + 1);
         }
     }
-#line 650 "rcksum/rcksum.ae"
+#line 668 "rcksum/rcksum.ae"
 int j = 0;
 while (j < b_len) {
         {
-#line 652 "rcksum/rcksum.ae"
+#line 670 "rcksum/rcksum.ae"
 fileio_buf_set(out, (a_len + j), (string_char_at_n(b, b_len, j) & 0xff));
-#line 653 "rcksum/rcksum.ae"
+#line 671 "rcksum/rcksum.ae"
 j = (j + 1);
         }
     }
-#line 655 "rcksum/rcksum.ae"
+#line 673 "rcksum/rcksum.ae"
     return aether_uniform_heap_str((const char*)(fileio_buf_to_str(out, total)), 1);
 }
 
-#line 659 "rcksum/rcksum.ae"
+#line 677 "rcksum/rcksum.ae"
 static _tuple_string_int rcksum_read_known_data(RcksumState* z, int len, int offset) {
 if (z->fd < 0) {
         {
-#line 661 "rcksum/rcksum.ae"
+#line 679 "rcksum/rcksum.ae"
             return (_tuple_string_int){aether_uniform_heap_str((const char*)(""), 0), 0};
         }
     }
-#line 663 "rcksum/rcksum.ae"
+#line 681 "rcksum/rcksum.ae"
     return fileio_read_at(z->fd, len, offset);
 }
 
@@ -3940,63 +4149,63 @@ n = (n + 1);
 }
 
 // Import: std.cryptography
-#line 72 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 80 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 static _tuple_string_string cryptography_sha1_hex(const char* data, int length) {
     int _heap_out = 0; (void)_heap_out;
     const char* out = NULL;
-#line 73 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 81 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 { const char* _tmp_old = out; out = cryptography_sha1_hex_raw(aether_string_data(data), length); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 0; }
 if (out == 0) {
         {
-#line 75 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 83 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
             return (_tuple_string_string){aether_uniform_heap_str((const char*)(""), 0), "openssl unavailable"};
         }
     }
-#line 77 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 85 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
     return (_tuple_string_string){aether_uniform_heap_str((const char*)(out), _heap_out), ""};
 }
 
-#line 143 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 151 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 static _tuple_string_string cryptography_base64_encode_padded(const char* data, int length) {
     int _heap_out = 0; (void)_heap_out;
     const char* out = NULL;
-#line 144 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 152 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 { const char* _tmp_old = out; out = cryptography_base64_encode_padded_raw(aether_string_data(data), length); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 0; }
 if (out == 0) {
         {
-#line 146 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
-            return (_tuple_string_string){aether_uniform_heap_str((const char*)(""), 0), "openssl unavailable"};
+#line 154 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+            return (_tuple_string_string){"", "openssl unavailable"};
         }
     }
-#line 148 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
-    return (_tuple_string_string){aether_uniform_heap_str((const char*)(out), _heap_out), ""};
+#line 156 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+    return (_tuple_string_string){out, ""};
 }
 
-#line 236 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 244 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 static _tuple_string_int_string cryptography_md4_bytes(const char* data, int length) {
     int _heap_raw = 0; (void)_heap_raw;
     const char* raw = NULL;
     int _heap_owned = 0; (void)_heap_owned;
     const char* owned = NULL;
-#line 237 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 245 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 int ok = cryptography_md4_bytes_raw(aether_string_data(data), length);
 if (ok == 0) {
         {
-#line 239 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 247 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
             _tuple_string_int_string _builder_ret = (_tuple_string_int_string){aether_uniform_heap_str((const char*)(""), 0), 0, "md4 unavailable"};
             /* deferred */ if (_heap_raw) { aether_heap_str_free(raw); raw = NULL; _heap_raw = 0; }
             return _builder_ret;
         }
     }
-#line 241 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 249 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 { const char* _tmp_old = raw; raw = cryptography_get_binary_digest(); if (_heap_raw) aether_heap_str_free(_tmp_old); _heap_raw = 0; }
-#line 242 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 250 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 int n = cryptography_get_binary_digest_length();
-#line 243 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 251 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 { const char* _tmp_old = owned; owned = string_new_with_length(raw, n); if (_heap_owned) aether_heap_str_free(_tmp_old); _heap_owned = 1; }
-#line 244 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 252 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 cryptography_release_binary_digest();
-#line 245 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 253 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
     _tuple_string_int_string _builder_ret = (_tuple_string_int_string){aether_uniform_heap_str((const char*)(owned), _heap_owned), n, ""};
     /* deferred */ if (_heap_raw) { aether_heap_str_free(raw); raw = NULL; _heap_raw = 0; }
     return _builder_ret;
@@ -4369,289 +4578,567 @@ int main(int argc, char** argv) {
     
     int _heap_out = 0; (void)_heap_out;
     const char* out = NULL;
-    int _heap_seed = 0; (void)_heap_seed;
-    const char* seed = NULL;
+    int _heap_auth_creds = 0; (void)_heap_auth_creds;
+    const char* auth_creds = NULL;
+    int _heap_keep = 0; (void)_heap_keep;
+    const char* keep = NULL;
     int _heap_source = 0; (void)_heap_source;
     const char* source = NULL;
     int _heap_a = 0; (void)_heap_a;
     const char* a = NULL;
+    int _heap_auth = 0; (void)_heap_auth;
+    const char* auth = NULL;
     int _heap_cbytes = 0; (void)_heap_cbytes;
     const char* cbytes = NULL;
     int _heap_cerr = 0; (void)_heap_cerr;
     const char* cerr = NULL;
-    int _heap_sdata = 0; (void)_heap_sdata;
-    const char* sdata = NULL;
-    int _heap_se = 0; (void)_heap_se;
-    const char* se = NULL;
-    int _heap_url = 0; (void)_heap_url;
-    const char* url = NULL;
+    int _heap_sf = 0; (void)_heap_sf;
+    const char* sf = NULL;
     int _heap_ferr = 0; (void)_heap_ferr;
     const char* ferr = NULL;
     int _heap_cerr2 = 0; (void)_heap_cerr2;
     const char* cerr2 = NULL;
+    int _heap_s = 0; (void)_heap_s;
+    const char* s = NULL;
     {
-#line 20 "cmd/zsync.ae"
+#line 27 "cmd/zsync.ae"
 int argc = aether_args_count();
-#line 21 "cmd/zsync.ae"
+#line 28 "cmd/zsync.ae"
 { const char* _tmp_old = out; out = ""; if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 0; }
-#line 22 "cmd/zsync.ae"
-{ const char* _tmp_old = seed; seed = ""; if (_heap_seed) aether_heap_str_free(_tmp_old); _heap_seed = 0; }
-#line 23 "cmd/zsync.ae"
+#line 29 "cmd/zsync.ae"
+void* seeds = list_new();
+#line 30 "cmd/zsync.ae"
+{ const char* _tmp_old = auth_creds; auth_creds = ""; if (_heap_auth_creds) aether_heap_str_free(_tmp_old); _heap_auth_creds = 0; }
+#line 31 "cmd/zsync.ae"
+{ const char* _tmp_old = keep; keep = ""; if (_heap_keep) aether_heap_str_free(_tmp_old); _heap_keep = 0; }
+#line 32 "cmd/zsync.ae"
+int quiet = 0;
+#line 33 "cmd/zsync.ae"
+int verbose = 0;
+#line 34 "cmd/zsync.ae"
 { const char* _tmp_old = source; source = ""; if (_heap_source) aether_heap_str_free(_tmp_old); _heap_source = 0; }
-#line 24 "cmd/zsync.ae"
+#line 36 "cmd/zsync.ae"
 int i = 1;
 while (i < argc) {
             {
-#line 26 "cmd/zsync.ae"
+#line 38 "cmd/zsync.ae"
 { const char* _tmp_old = a; a = aether_args_get(i); if (_heap_a) aether_heap_str_free(_tmp_old); _heap_a = 0; }
 if (string_equals(a, "-o") == 1) {
                     {
-#line 28 "cmd/zsync.ae"
+#line 40 "cmd/zsync.ae"
 i = (i + 1);
-#line 29 "cmd/zsync.ae"
+#line 41 "cmd/zsync.ae"
 { const char* _tmp_old = out; out = aether_args_get(i); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 0; }
                     }
                 } else {
 if (string_equals(a, "-i") == 1) {
                         {
-#line 31 "cmd/zsync.ae"
+#line 43 "cmd/zsync.ae"
 i = (i + 1);
-#line 32 "cmd/zsync.ae"
-{ const char* _tmp_old = seed; seed = aether_args_get(i); if (_heap_seed) aether_heap_str_free(_tmp_old); _heap_seed = 0; }
+#line 44 "cmd/zsync.ae"
+list_add_string_owned(seeds, (void*)str_owned(aether_args_get(i)));
                         }
                     } else {
-                        {
-#line 34 "cmd/zsync.ae"
+if (string_equals(a, "-A") == 1) {
+                            {
+#line 46 "cmd/zsync.ae"
+i = (i + 1);
+#line 47 "cmd/zsync.ae"
+{ const char* _tmp_old = auth_creds; auth_creds = creds_of(aether_args_get(i)); if (_heap_auth_creds) aether_heap_str_free(_tmp_old); _heap_auth_creds = 1; }
+                            }
+                        } else {
+if (string_equals(a, "-k") == 1) {
+                                {
+#line 49 "cmd/zsync.ae"
+i = (i + 1);
+#line 50 "cmd/zsync.ae"
+{ const char* _tmp_old = keep; keep = aether_args_get(i); if (_heap_keep) aether_heap_str_free(_tmp_old); _heap_keep = 0; }
+                                }
+                            } else {
+if (string_equals(a, "-q") == 1) {
+                                    {
+#line 52 "cmd/zsync.ae"
+quiet = 1;
+                                    }
+                                } else {
+if (string_equals(a, "-v") == 1) {
+                                        {
+#line 54 "cmd/zsync.ae"
+verbose = 1;
+                                        }
+                                    } else {
+if (string_equals(a, "-V") == 1) {
+                                            {
+#line 56 "cmd/zsync.ae"
+printf("zsync v%s", _aether_safe_str(VERSION())); putchar('\n');
+#line 57 "cmd/zsync.ae"
+exit(0);
+                                            }
+                                        } else {
+if (string_equals(a, "--no-check-certificate") == 1) {
+                                                {
+                                                }
+                                            } else {
+                                                {
+#line 63 "cmd/zsync.ae"
 { const char* _tmp_old = source; source = aether_uniform_heap_str(a, 0); if (_heap_source) aether_heap_str_free(_tmp_old); _heap_source = 1; }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
-#line 36 "cmd/zsync.ae"
+#line 65 "cmd/zsync.ae"
 i = (i + 1);
             }
         }
 if (string_equals(source, "") == 1) {
             {
-#line 40 "cmd/zsync.ae"
-puts("usage: zsync [-o output] [-i seedfile] <.zsync url-or-path>");
-#line 41 "cmd/zsync.ae"
+#line 69 "cmd/zsync.ae"
+puts("usage: zsync [-o out] [-i seed]... [-A host=user:pass] [-k keep] [-q] [-v] [-V] <.zsync>");
+#line 70 "cmd/zsync.ae"
 exit(3);
             }
         }
-#line 45 "cmd/zsync.ae"
-        _tuple_string_int_string _tup9 = clientlib_fetch_control(source);
+#line 73 "cmd/zsync.ae"
+{ const char* _tmp_old = auth; auth = clientlib_basic_auth(auth_creds); if (_heap_auth) aether_heap_str_free(_tmp_old); _heap_auth = 1; }
+#line 76 "cmd/zsync.ae"
+        _tuple_string_int_string _tup9 = get_control(source, keep, auth, quiet);
         { const char* _tmp_old = cbytes; cbytes = _tup9._0; if (_heap_cbytes) aether_heap_str_free(_tmp_old); _heap_cbytes = 1; }
         int clen = _tup9._1;
-        { const char* _tmp_old = cerr; cerr = _tup9._2; if (_heap_cerr) aether_heap_str_free(_tmp_old); _heap_cerr = 1; }
+        { const char* _tmp_old = cerr; cerr = _tup9._2; if (_heap_cerr) aether_heap_str_free(_tmp_old); _heap_cerr = 0; }
 if (strcmp(_aether_safe_str(cerr), _aether_safe_str("")) != 0) {
             {
-#line 47 "cmd/zsync.ae"
+#line 78 "cmd/zsync.ae"
 printf("failed to fetch control file: %s", _aether_safe_str(cerr)); putchar('\n');
-#line 48 "cmd/zsync.ae"
+#line 79 "cmd/zsync.ae"
 exit(3);
             }
         }
-#line 50 "cmd/zsync.ae"
+#line 81 "cmd/zsync.ae"
 Control* ctl = control_parse(cbytes, clen);
 if (control_ctl_ok(ctl) == 0) {
             {
-#line 52 "cmd/zsync.ae"
+#line 83 "cmd/zsync.ae"
 printf("failed to parse control file: %s", _aether_safe_str(control_ctl_err(ctl))); putchar('\n');
-#line 53 "cmd/zsync.ae"
+#line 84 "cmd/zsync.ae"
 exit(3);
             }
         }
 if (string_equals(out, "") == 1) {
             {
-#line 58 "cmd/zsync.ae"
+#line 89 "cmd/zsync.ae"
 { const char* _tmp_old = out; out = control_ctl_filename(ctl); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 0; }
 if (string_equals(out, "") == 1) {
                     {
-#line 60 "cmd/zsync.ae"
+#line 91 "cmd/zsync.ae"
 { const char* _tmp_old = out; out = "zsync-download"; if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 0; }
                     }
                 }
             }
         }
-#line 65 "cmd/zsync.ae"
+#line 95 "cmd/zsync.ae"
 int fd = fileio_open_rw(out);
 if (fd < 0) {
             {
-#line 67 "cmd/zsync.ae"
+#line 97 "cmd/zsync.ae"
 printf("cannot open output %s", _aether_safe_str(out)); putchar('\n');
-#line 68 "cmd/zsync.ae"
+#line 98 "cmd/zsync.ae"
 exit(1);
             }
         }
-#line 70 "cmd/zsync.ae"
+#line 100 "cmd/zsync.ae"
 State* st = download_new_state(ctl, fd);
-if (string_equals(seed, "") == 0) {
+#line 105 "cmd/zsync.ae"
+feed_seed_if_exists(st, out, quiet);
+#line 106 "cmd/zsync.ae"
+int ns = list_size(seeds);
+#line 107 "cmd/zsync.ae"
+int si = 0;
+while (si < ns) {
             {
-if (fs_exists(seed) == 1) {
+#line 109 "cmd/zsync.ae"
+{ const char* _tmp_old = sf; sf = fileio_buf_as_string(list_get_raw(seeds, si)); if (_heap_sf) aether_heap_str_free(_tmp_old); _heap_sf = 0; }
+#line 110 "cmd/zsync.ae"
+feed_seed_if_exists(st, sf, quiet);
+#line 111 "cmd/zsync.ae"
+si = (si + 1);
+            }
+        }
+if (download_status(st) == 0) {
+            {
+if (quiet == 0) {
                     {
-#line 75 "cmd/zsync.ae"
-                        _tuple_string_int_string _tup10 = fs_read_binary(seed);
-                        { const char* _tmp_old = sdata; sdata = _tup10._0; if (_heap_sdata) aether_heap_str_free(_tmp_old); _heap_sdata = 1; }
-                        int slen = _tup10._1;
-                        { const char* _tmp_old = se; se = _tup10._2; if (_heap_se) aether_heap_str_free(_tmp_old); _heap_se = 0; }
-if (strcmp(_aether_safe_str(se), _aether_safe_str("")) == 0) {
-                            {
-#line 77 "cmd/zsync.ae"
-download_submit_source(st, sdata, slen);
-                            }
+#line 116 "cmd/zsync.ae"
+puts("No relevant local data — downloading the whole file.");
+                    }
+                }
+            }
+        }
+#line 121 "cmd/zsync.ae"
+{ const char* _tmp_old = ferr; ferr = fetch_from_urls(st, ctl, source, auth, quiet); if (_heap_ferr) aether_heap_str_free(_tmp_old); _heap_ferr = 0; }
+if (strcmp(_aether_safe_str(ferr), _aether_safe_str("")) != 0) {
+            {
+#line 123 "cmd/zsync.ae"
+printf("download failed: %s", _aether_safe_str(ferr)); putchar('\n');
+#line 124 "cmd/zsync.ae"
+exit(3);
+            }
+        }
+#line 128 "cmd/zsync.ae"
+{ const char* _tmp_old = cerr2; cerr2 = download_complete(st); if (_heap_cerr2) aether_heap_str_free(_tmp_old); _heap_cerr2 = 0; }
+#line 129 "cmd/zsync.ae"
+fileio_close_fd(fd);
+if (strcmp(_aether_safe_str(cerr2), _aether_safe_str("")) != 0) {
+            {
+#line 131 "cmd/zsync.ae"
+printf("verification failed: %s", _aether_safe_str(cerr2)); putchar('\n');
+#line 132 "cmd/zsync.ae"
+exit(2);
+            }
+        }
+if (quiet == 0) {
+            {
+#line 135 "cmd/zsync.ae"
+puts("verifying download...checksum matches OK");
+#line 136 "cmd/zsync.ae"
+                _tuple_int_int _tup10 = download_progress(st);
+                int got = _tup10._0;
+                int total = _tup10._1;
+#line 137 "cmd/zsync.ae"
+printf("download complete: %s", _aether_safe_str(out)); putchar('\n');
+            }
+        }
+if (verbose == 1) {
+            {
+#line 140 "cmd/zsync.ae"
+s = download_stats_line(st);
+#line 141 "cmd/zsync.ae"
+printf("%s\n", _aether_safe_str(s));
+            }
+        }
+    }
+    /* deferred */ if (_heap_cerr2) { aether_heap_str_free(cerr2); cerr2 = NULL; _heap_cerr2 = 0; }
+    /* deferred */ if (_heap_ferr) { aether_heap_str_free(ferr); ferr = NULL; _heap_ferr = 0; }
+    /* deferred */ if (_heap_sf) { aether_heap_str_free(sf); sf = NULL; _heap_sf = 0; }
+    /* deferred */ if (_heap_cerr) { aether_heap_str_free(cerr); cerr = NULL; _heap_cerr = 0; }
+    /* deferred */ if (_heap_cbytes) { aether_heap_str_free(cbytes); cbytes = NULL; _heap_cbytes = 0; }
+    /* deferred */ if (_heap_auth) { aether_heap_str_free(auth); auth = NULL; _heap_auth = 0; }
+    /* deferred */ if (_heap_a) { aether_heap_str_free(a); a = NULL; _heap_a = 0; }
+    /* deferred */ if (_heap_source) { aether_heap_str_free(source); source = NULL; _heap_source = 0; }
+    /* deferred */ if (_heap_keep) { aether_heap_str_free(keep); keep = NULL; _heap_keep = 0; }
+    /* deferred */ if (_heap_auth_creds) { aether_heap_str_free(auth_creds); auth_creds = NULL; _heap_auth_creds = 0; }
+    /* deferred */ if (_heap_out) { aether_heap_str_free(out); out = NULL; _heap_out = 0; }
+    return 0;
+}
+#line 148 "cmd/zsync.ae"
+_tuple_string_int_string get_control(const char* source, const char* keep, const char* auth, int quiet) {
+    int _heap_ims = 0; (void)_heap_ims;
+    const char* ims = NULL;
+    int _heap_me = 0; (void)_heap_me;
+    const char* me = NULL;
+    int _heap_body = 0; (void)_heap_body;
+    const char* body = NULL;
+    int _heap_e = 0; (void)_heap_e;
+    const char* e = NULL;
+if (fs_exists(source) == 1) {
+        {
+#line 151 "cmd/zsync.ae"
+            _tuple_string_int_string _builder_ret = fs_read_binary(source);
+            if (_heap_e) { aether_heap_str_free(e); e = NULL; _heap_e = 0; }
+            if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
+            /* deferred */ if (_heap_me) { aether_heap_str_free(me); me = NULL; _heap_me = 0; }
+            /* deferred */ if (_heap_ims) { aether_heap_str_free(ims); ims = NULL; _heap_ims = 0; }
+            return _builder_ret;
+        }
+    }
+#line 153 "cmd/zsync.ae"
+{ const char* _tmp_old = ims; ims = ""; if (_heap_ims) aether_heap_str_free(_tmp_old); _heap_ims = 0; }
+if (string_equals(keep, "") == 0) {
+        {
+if (fs_exists(keep) == 1) {
+                {
+#line 156 "cmd/zsync.ae"
+                    _tuple_int_string _tup11 = fs_mtime(keep);
+                    int epoch = _tup11._0;
+                    { const char* _tmp_old = me; me = _tup11._1; if (_heap_me) aether_heap_str_free(_tmp_old); _heap_me = 0; }
+if (strcmp(_aether_safe_str(me), _aether_safe_str("")) == 0) {
+                        {
+#line 158 "cmd/zsync.ae"
+{ const char* _tmp_old = ims; ims = fileio_rfc1123z(epoch); if (_heap_ims) aether_heap_str_free(_tmp_old); _heap_ims = 0; }
                         }
                     }
                 }
             }
         }
-#line 83 "cmd/zsync.ae"
-{ const char* _tmp_old = url; url = first_url(ctl, source); if (_heap_url) aether_heap_str_free(_tmp_old); _heap_url = 1; }
-if (string_equals(url, "") == 1) {
-            {
-#line 85 "cmd/zsync.ae"
-puts("no download URL known");
-#line 86 "cmd/zsync.ae"
-exit(3);
-            }
-        }
-#line 88 "cmd/zsync.ae"
-{ const char* _tmp_old = ferr; ferr = clientlib_fetch_remaining(st, url); if (_heap_ferr) aether_heap_str_free(_tmp_old); _heap_ferr = 1; }
-if (strcmp(_aether_safe_str(ferr), _aether_safe_str("")) != 0) {
-            {
-#line 90 "cmd/zsync.ae"
-printf("download failed: %s", _aether_safe_str(ferr)); putchar('\n');
-#line 91 "cmd/zsync.ae"
-exit(3);
-            }
-        }
-#line 95 "cmd/zsync.ae"
-{ const char* _tmp_old = cerr2; cerr2 = download_complete(st); if (_heap_cerr2) aether_heap_str_free(_tmp_old); _heap_cerr2 = 0; }
-#line 96 "cmd/zsync.ae"
-fileio_close_fd(fd);
-if (strcmp(_aether_safe_str(cerr2), _aether_safe_str("")) != 0) {
-            {
-#line 98 "cmd/zsync.ae"
-printf("verification failed: %s", _aether_safe_str(cerr2)); putchar('\n');
-#line 99 "cmd/zsync.ae"
-exit(2);
-            }
-        }
-#line 101 "cmd/zsync.ae"
-        _tuple_int_int _tup11 = download_progress(st);
-        int got = _tup11._0;
-        int total = _tup11._1;
-#line 102 "cmd/zsync.ae"
-printf("download complete: %s", _aether_safe_str(out)); putchar('\n');
     }
-    /* deferred */ if (_heap_cerr2) { aether_heap_str_free(cerr2); cerr2 = NULL; _heap_cerr2 = 0; }
-    /* deferred */ if (_heap_ferr) { aether_heap_str_free(ferr); ferr = NULL; _heap_ferr = 0; }
-    /* deferred */ if (_heap_url) { aether_heap_str_free(url); url = NULL; _heap_url = 0; }
-    /* deferred */ if (_heap_se) { aether_heap_str_free(se); se = NULL; _heap_se = 0; }
-    /* deferred */ if (_heap_sdata) { aether_heap_str_free(sdata); sdata = NULL; _heap_sdata = 0; }
-    /* deferred */ if (_heap_cerr) { aether_heap_str_free(cerr); cerr = NULL; _heap_cerr = 0; }
-    /* deferred */ if (_heap_cbytes) { aether_heap_str_free(cbytes); cbytes = NULL; _heap_cbytes = 0; }
-    /* deferred */ if (_heap_a) { aether_heap_str_free(a); a = NULL; _heap_a = 0; }
-    /* deferred */ if (_heap_source) { aether_heap_str_free(source); source = NULL; _heap_source = 0; }
-    /* deferred */ if (_heap_seed) { aether_heap_str_free(seed); seed = NULL; _heap_seed = 0; }
-    /* deferred */ if (_heap_out) { aether_heap_str_free(out); out = NULL; _heap_out = 0; }
-    return 0;
+#line 162 "cmd/zsync.ae"
+    _tuple_string_int_int_string _tup12 = clientlib_http_get_auth(source, auth, ims);
+    { const char* _tmp_old = body; body = _tup12._0; if (_heap_body) aether_heap_str_free(_tmp_old); _heap_body = 1; }
+    int n = _tup12._1;
+    int status = _tup12._2;
+    { const char* _tmp_old = e; e = _tup12._3; if (_heap_e) aether_heap_str_free(_tmp_old); _heap_e = 1; }
+if (status == 304) {
+        {
+if (quiet == 0) {
+                {
+#line 165 "cmd/zsync.ae"
+puts("control file not modified — using local copy");
+                }
+            }
+#line 167 "cmd/zsync.ae"
+            _tuple_string_int_string _builder_ret = fs_read_binary(keep);
+            if (_heap_e) { aether_heap_str_free(e); e = NULL; _heap_e = 0; }
+            if (_heap_body) { aether_heap_str_free(body); body = NULL; _heap_body = 0; }
+            /* deferred */ if (_heap_me) { aether_heap_str_free(me); me = NULL; _heap_me = 0; }
+            /* deferred */ if (_heap_ims) { aether_heap_str_free(ims); ims = NULL; _heap_ims = 0; }
+            return _builder_ret;
+        }
+    }
+if (strcmp(_aether_safe_str(e), _aether_safe_str("")) != 0) {
+        {
+#line 170 "cmd/zsync.ae"
+            _tuple_string_int_string _builder_ret = (_tuple_string_int_string){aether_uniform_heap_str((const char*)(""), 0), 0, e};
+            /* deferred */ if (_heap_me) { aether_heap_str_free(me); me = NULL; _heap_me = 0; }
+            /* deferred */ if (_heap_ims) { aether_heap_str_free(ims); ims = NULL; _heap_ims = 0; }
+            return _builder_ret;
+        }
+    }
+if (string_equals(keep, "") == 0) {
+        {
+#line 173 "cmd/zsync.ae"
+fs_write_binary(keep, body, n);
+        }
+    }
+#line 175 "cmd/zsync.ae"
+    _tuple_string_int_string _builder_ret = (_tuple_string_int_string){aether_uniform_heap_str((const char*)(body), _heap_body), n, ""};
+    /* deferred */ if (_heap_me) { aether_heap_str_free(me); me = NULL; _heap_me = 0; }
+    /* deferred */ if (_heap_ims) { aether_heap_str_free(ims); ims = NULL; _heap_ims = 0; }
+    return _builder_ret;
+    /* deferred */ if (_heap_me) { aether_heap_str_free(me); me = NULL; _heap_me = 0; }
+    /* deferred */ if (_heap_ims) { aether_heap_str_free(ims); ims = NULL; _heap_ims = 0; }
 }
-#line 107 "cmd/zsync.ae"
-const char* first_url(void* ctl, const char* source) {
+
+#line 181 "cmd/zsync.ae"
+const char* fetch_from_urls(void* st, void* ctl, const char* source, const char* auth, int quiet) {
+    int _heap_last_err = 0; (void)_heap_last_err;
+    const char* last_err = NULL;
     int _heap_u = 0; (void)_heap_u;
     const char* u = NULL;
-#line 108 "cmd/zsync.ae"
+    int _heap_e = 0; (void)_heap_e;
+    const char* e = NULL;
+#line 182 "cmd/zsync.ae"
 void* urls = control_ctl_urls(ctl);
 if (urls == NULL) {
         {
-#line 110 "cmd/zsync.ae"
-            const char* _no_defer_ret = aether_uniform_heap_str((const char*)(""), 0);
-            if (_heap_u) { aether_heap_str_free(u); u = NULL; _heap_u = 0; }
-            return _no_defer_ret;
+#line 184 "cmd/zsync.ae"
+            const char* _builder_ret = "no download URLs known";
+            if (_heap_last_err) { aether_heap_str_free(last_err); last_err = NULL; _heap_last_err = 0; }
+            /* deferred */ if (_heap_e) { aether_heap_str_free(e); e = NULL; _heap_e = 0; }
+            /* deferred */ if (_heap_u) { aether_heap_str_free(u); u = NULL; _heap_u = 0; }
+            return _builder_ret;
         }
     }
-#line 112 "cmd/zsync.ae"
-int n = url_count(urls);
+#line 186 "cmd/zsync.ae"
+int n = list_size(urls);
 if (n == 0) {
         {
-#line 114 "cmd/zsync.ae"
-            const char* _no_defer_ret = aether_uniform_heap_str((const char*)(""), 0);
-            if (_heap_u) { aether_heap_str_free(u); u = NULL; _heap_u = 0; }
-            return _no_defer_ret;
+#line 188 "cmd/zsync.ae"
+            const char* _builder_ret = "no download URLs known";
+            if (_heap_last_err) { aether_heap_str_free(last_err); last_err = NULL; _heap_last_err = 0; }
+            /* deferred */ if (_heap_e) { aether_heap_str_free(e); e = NULL; _heap_e = 0; }
+            /* deferred */ if (_heap_u) { aether_heap_str_free(u); u = NULL; _heap_u = 0; }
+            return _builder_ret;
         }
     }
-#line 116 "cmd/zsync.ae"
-u = url_at(urls, 0);
+#line 190 "cmd/zsync.ae"
+{ const char* _tmp_old = last_err; last_err = "no download URLs known"; if (_heap_last_err) aether_heap_str_free(_tmp_old); _heap_last_err = 0; }
+#line 191 "cmd/zsync.ae"
+int i = 0;
+while (i < n) {
+        {
+if (download_status(st) >= 2) {
+                {
+#line 194 "cmd/zsync.ae"
+                    const char* _builder_ret = "";
+                    if (_heap_last_err) { aether_heap_str_free(last_err); last_err = NULL; _heap_last_err = 0; }
+                    /* deferred */ if (_heap_e) { aether_heap_str_free(e); e = NULL; _heap_e = 0; }
+                    /* deferred */ if (_heap_u) { aether_heap_str_free(u); u = NULL; _heap_u = 0; }
+                    return _builder_ret;
+                }
+            }
+#line 196 "cmd/zsync.ae"
+{ const char* _tmp_old = u; u = resolve(fileio_buf_as_string(list_get_raw(urls, i)), source); if (_heap_u) aether_heap_str_free(_tmp_old); _heap_u = 1; }
+if (quiet == 0) {
+                {
+#line 198 "cmd/zsync.ae"
+printf("downloading new blocks from %s", _aether_safe_str(u)); putchar('\n');
+                }
+            }
+#line 200 "cmd/zsync.ae"
+{ const char* _tmp_old = e; e = clientlib_fetch_remaining(st, u, auth); if (_heap_e) aether_heap_str_free(_tmp_old); _heap_e = 1; }
+if (strcmp(_aether_safe_str(e), _aether_safe_str("")) == 0) {
+                {
+#line 202 "cmd/zsync.ae"
+                    const char* _builder_ret = "";
+                    if (_heap_last_err) { aether_heap_str_free(last_err); last_err = NULL; _heap_last_err = 0; }
+                    /* deferred */ if (_heap_e) { aether_heap_str_free(e); e = NULL; _heap_e = 0; }
+                    /* deferred */ if (_heap_u) { aether_heap_str_free(u); u = NULL; _heap_u = 0; }
+                    return _builder_ret;
+                }
+            }
+#line 204 "cmd/zsync.ae"
+{ const char* _tmp_old = last_err; last_err = aether_uniform_heap_str(e, 0); if (_heap_last_err) aether_heap_str_free(_tmp_old); _heap_last_err = 1; }
+if (quiet == 0) {
+                {
+#line 206 "cmd/zsync.ae"
+printf("failed from %s: %s", _aether_safe_str(u), _aether_safe_str(e)); putchar('\n');
+                }
+            }
+#line 208 "cmd/zsync.ae"
+i = (i + 1);
+        }
+    }
+if (download_status(st) >= 2) {
+        {
+#line 211 "cmd/zsync.ae"
+            const char* _builder_ret = "";
+            if (_heap_last_err) { aether_heap_str_free(last_err); last_err = NULL; _heap_last_err = 0; }
+            /* deferred */ if (_heap_e) { aether_heap_str_free(e); e = NULL; _heap_e = 0; }
+            /* deferred */ if (_heap_u) { aether_heap_str_free(u); u = NULL; _heap_u = 0; }
+            return _builder_ret;
+        }
+    }
+#line 213 "cmd/zsync.ae"
+    const char* _builder_ret = last_err;
+    /* deferred */ if (_heap_e) { aether_heap_str_free(e); e = NULL; _heap_e = 0; }
+    /* deferred */ if (_heap_u) { aether_heap_str_free(u); u = NULL; _heap_u = 0; }
+    return _builder_ret;
+    /* deferred */ if (_heap_e) { aether_heap_str_free(e); e = NULL; _heap_e = 0; }
+    /* deferred */ if (_heap_u) { aether_heap_str_free(u); u = NULL; _heap_u = 0; }
+}
+
+#line 216 "cmd/zsync.ae"
+void feed_seed_if_exists(void* st, const char* path, int quiet) {
+    int _heap_data = 0; (void)_heap_data;
+    const char* data = NULL;
+    int _heap_e = 0; (void)_heap_e;
+    const char* e = NULL;
+if (fs_exists(path) == 0) {
+        {
+#line 218 "cmd/zsync.ae"
+            /* deferred */ if (_heap_e) { aether_heap_str_free(e); e = NULL; _heap_e = 0; }
+            /* deferred */ if (_heap_data) { aether_heap_str_free(data); data = NULL; _heap_data = 0; }
+            return;
+        }
+    }
+#line 220 "cmd/zsync.ae"
+    _tuple_string_int_string _tup13 = fs_read_binary(path);
+    { const char* _tmp_old = data; data = _tup13._0; if (_heap_data) aether_heap_str_free(_tmp_old); _heap_data = 1; }
+    int n = _tup13._1;
+    { const char* _tmp_old = e; e = _tup13._2; if (_heap_e) aether_heap_str_free(_tmp_old); _heap_e = 0; }
+if (strcmp(_aether_safe_str(e), _aether_safe_str("")) != 0) {
+        {
+#line 222 "cmd/zsync.ae"
+            /* deferred */ if (_heap_e) { aether_heap_str_free(e); e = NULL; _heap_e = 0; }
+            /* deferred */ if (_heap_data) { aether_heap_str_free(data); data = NULL; _heap_data = 0; }
+            return;
+        }
+    }
+if (quiet == 0) {
+        {
+#line 225 "cmd/zsync.ae"
+printf("reading seed file %s", _aether_safe_str(path)); putchar('\n');
+        }
+    }
+#line 227 "cmd/zsync.ae"
+download_submit_source(st, data, n);
+    /* deferred */ if (_heap_e) { aether_heap_str_free(e); e = NULL; _heap_e = 0; }
+    /* deferred */ if (_heap_data) { aether_heap_str_free(data); data = NULL; _heap_data = 0; }
+}
+
+#line 232 "cmd/zsync.ae"
+const char* creds_of(const char* v) {
+#line 233 "cmd/zsync.ae"
+int eq = string_index_of(v, "=");
+if (eq < 0) {
+        {
+#line 235 "cmd/zsync.ae"
+            return aether_uniform_heap_str((const char*)(v), 0);
+        }
+    }
+#line 237 "cmd/zsync.ae"
+    return aether_uniform_heap_str((const char*)(string_substring(v, (eq + 1), string_length(v))), 1);
+}
+
+#line 242 "cmd/zsync.ae"
+const char* resolve(const char* u, const char* source) {
 if (is_abs(u) == 1) {
         {
-#line 118 "cmd/zsync.ae"
-            const char* _no_defer_ret = aether_uniform_heap_str((const char*)(u), _heap_u);
-            return _no_defer_ret;
+#line 244 "cmd/zsync.ae"
+            return aether_uniform_heap_str((const char*)(u), 0);
         }
     }
-#line 121 "cmd/zsync.ae"
-    const char* _no_defer_ret = aether_uniform_heap_str((const char*)(join_url(source, u)), 1);
-    if (_heap_u) { aether_heap_str_free(u); u = NULL; _heap_u = 0; }
-    return _no_defer_ret;
+#line 246 "cmd/zsync.ae"
+int last = last_slash(source);
+if (last < 0) {
+        {
+#line 248 "cmd/zsync.ae"
+            return aether_uniform_heap_str((const char*)(u), 0);
+        }
+    }
+#line 250 "cmd/zsync.ae"
+    return aether_uniform_heap_str((const char*)(({ const char* _ad_15 = (const char*)(string_substring(source, 0, (last + 1))); const char* _ad_r = string_concat(_ad_15, u); aether_heap_str_free(_ad_15); _ad_r; })), 1);
 }
 
-#line 127 "cmd/zsync.ae"
-int url_count(void* l) {
-#line 128 "cmd/zsync.ae"
-    return list_size(l);
-}
-
-#line 131 "cmd/zsync.ae"
-const char* url_at(void* l, int i) {
-#line 132 "cmd/zsync.ae"
-    return fileio_buf_as_string(list_get_raw(l, i));
-}
-
-#line 135 "cmd/zsync.ae"
+#line 253 "cmd/zsync.ae"
 int is_abs(const char* u) {
 if (string_starts_with(u, "http://") == 1) {
         {
-#line 137 "cmd/zsync.ae"
+#line 255 "cmd/zsync.ae"
             return 1;
         }
     }
 if (string_starts_with(u, "https://") == 1) {
         {
-#line 140 "cmd/zsync.ae"
+#line 258 "cmd/zsync.ae"
             return 1;
         }
     }
-#line 142 "cmd/zsync.ae"
+#line 260 "cmd/zsync.ae"
     return 0;
 }
 
-#line 146 "cmd/zsync.ae"
-const char* join_url(const char* base, const char* rel) {
-#line 147 "cmd/zsync.ae"
-int n = string_length(base);
-#line 148 "cmd/zsync.ae"
+#line 263 "cmd/zsync.ae"
+int last_slash(const char* s) {
+#line 264 "cmd/zsync.ae"
+int n = string_length(s);
+#line 265 "cmd/zsync.ae"
 int last = -1;
-#line 149 "cmd/zsync.ae"
+#line 266 "cmd/zsync.ae"
 int i = 0;
 while (i < n) {
         {
-if ((string_char_at(base, i) & 0xff) == 47) {
+if ((string_char_at(s, i) & 0xff) == 47) {
                 {
-#line 152 "cmd/zsync.ae"
+#line 269 "cmd/zsync.ae"
 last = i;
                 }
             }
-#line 154 "cmd/zsync.ae"
+#line 271 "cmd/zsync.ae"
 i = (i + 1);
         }
     }
-if (last < 0) {
-        {
-#line 157 "cmd/zsync.ae"
-            return aether_uniform_heap_str((const char*)(rel), 0);
-        }
-    }
-#line 159 "cmd/zsync.ae"
-    return aether_uniform_heap_str((const char*)(({ const char* _ad_11 = (const char*)(string_substring(base, 0, (last + 1))); const char* _ad_r = string_concat(_ad_11, rel); aether_heap_str_free(_ad_11); _ad_r; })), 1);
+#line 273 "cmd/zsync.ae"
+    return last;
+}
+
+#line 277 "cmd/zsync.ae"
+const char* str_owned(const char* s) {
+#line 278 "cmd/zsync.ae"
+    return aether_uniform_heap_str((const char*)(string_concat(s, "")), 1);
 }
 

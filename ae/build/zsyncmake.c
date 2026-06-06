@@ -225,6 +225,7 @@ typedef struct RSum {
 #define fs_KIND_NOT_DIR (11)
 #define fs_KIND_UNAVAILABLE (99)
 // Forward declarations
+const char* VERSION(void);
 static _tuple_int_string fs_mtime(const char*);
 static const char* fs_mkdir_p(const char*);
 static const char* fs_write_binary(const char*, const char*, int);
@@ -240,6 +241,13 @@ static const char* mklib_generate(const char*, int, int, const char*, const char
 static const char* mklib_block_at(const char*, int, int, int);
 static const char* mklib_cat(const char*, const char*);
 static const char* mklib_int_str(int);
+static void* fileio_buf_alloc(int);
+static void fileio_buf_set(void*, int, int);
+static const char* fileio_buf_to_str(void*, int);
+static const char* fileio_pad_block(const char*, int, int, int, int);
+static const char* fileio_slice(const char*, int, int, int);
+static const char* fileio_buf_as_string(void*);
+static const char* fileio_rfc1123z(int);
 static _tuple_string_string cryptography_sha1_hex(const char*, int);
 static _tuple_string_int_string cryptography_md4_bytes(const char*, int);
 static RSum* checksums_new_rsum(int, int);
@@ -248,12 +256,6 @@ static int checksums_rsum_b(RSum*);
 static RSum* checksums_calc_rsum_block(const char*, int, int, int);
 static const char* checksums_calc_checksum(const char*, int);
 static int checksums_byte_at(const char*, int, int);
-static void* fileio_buf_alloc(int);
-static void fileio_buf_set(void*, int, int);
-static const char* fileio_buf_to_str(void*, int);
-static const char* fileio_pad_block(const char*, int, int, int, int);
-static const char* fileio_slice(const char*, int, int, int);
-static const char* fileio_buf_as_string(void*);
 int parse_int_arg(const char*);
 const char* basename(const char*);
 
@@ -694,6 +696,36 @@ const char* path_extension(const char*);
 // Extern C function: path_is_absolute
 int path_is_absolute(const char*);
 
+// Extern C function: path_clean
+const char* path_clean(const char*);
+
+// Extern C function: path_is_within_base
+int path_is_within_base(const char*, const char*);
+
+// Extern C function: path_rel
+const char* path_rel(const char*, const char*);
+
+// Extern C function: fs_pwrite_raw
+int64_t fs_pwrite_raw(void*, const char*, int, int64_t);
+
+// Extern C function: fs_pread_raw
+int fs_pread_raw(void*, int, int64_t);
+
+// Extern C function: fs_get_pread
+const char* fs_get_pread(void);
+
+// Extern C function: fs_get_pread_length
+int fs_get_pread_length(void);
+
+// Extern C function: fs_release_pread
+void fs_release_pread(void);
+
+// Extern C function: fs_ftruncate_raw
+const char* fs_ftruncate_raw(void*, int64_t);
+
+// Extern C function: fs_fsync_raw
+const char* fs_fsync_raw(void*);
+
 // Extern C function: fs_glob_raw
 void* fs_glob_raw(const char*);
 
@@ -708,6 +740,61 @@ int string_length(const char*);
 
 // Extern C function: string_new_with_length
 void* string_new_with_length(const char*, int);
+
+// Extern C function: malloc (libc-provided, declaration skipped)
+// Extern C function: zsync_io_open_rw_trunc
+int zsync_io_open_rw_trunc(const char*);
+
+// Extern C function: zsync_io_open_ro
+int zsync_io_open_ro(const char*);
+
+// Extern C function: zsync_io_pwrite
+int64_t zsync_io_pwrite(int, const char*, int64_t, int64_t);
+
+// Extern C function: zsync_io_pread_alloc
+const char* zsync_io_pread_alloc(int, int64_t, int64_t);
+
+// Extern C function: zsync_io_last_read_len
+int64_t zsync_io_last_read_len(void);
+
+// Extern C function: zsync_io_ftruncate
+int zsync_io_ftruncate(int, int64_t);
+
+// Extern C function: zsync_io_close
+int zsync_io_close(int);
+
+// Extern C function: zsync_io_fsync
+int zsync_io_fsync(int);
+
+// Extern C function: zsync_buf_alloc
+void* zsync_buf_alloc(int64_t);
+
+// Extern C function: zsync_buf_alloc_str
+const char* zsync_buf_alloc_str(int64_t);
+
+// Extern C function: zsync_buf_get
+int zsync_buf_get(void*, int64_t);
+
+// Extern C function: zsync_buf_set
+void zsync_buf_set(void*, int64_t, int);
+
+// Extern C function: zsync_buf_or
+void zsync_buf_or(void*, int64_t, int);
+
+// Extern C function: zsync_buf_free
+void zsync_buf_free(void*);
+
+// Extern C function: zsync_buf_identity
+const char* zsync_buf_identity(void*);
+
+// Extern C function: zsync_rfc1123z
+const char* zsync_rfc1123z(int64_t);
+
+// Extern C function: zsync_parse_rfc1123
+int64_t zsync_parse_rfc1123(const char*);
+
+// Extern C function: zsync_dup16
+const char* zsync_dup16(void*);
 
 // Extern C function: math_abs_int
 int math_abs_int(int);
@@ -868,110 +955,80 @@ int cryptography_get_binary_digest_length(void);
 // Extern C function: cryptography_release_binary_digest
 void cryptography_release_binary_digest(void);
 
+// Extern C function: cryptography_random_bytes_raw
+int cryptography_random_bytes_raw(int);
+
+// Extern C function: cryptography_get_random_bytes
+const char* cryptography_get_random_bytes(void);
+
+// Extern C function: cryptography_get_random_bytes_length
+int cryptography_get_random_bytes_length(void);
+
+// Extern C function: cryptography_release_random_bytes
+void cryptography_release_random_bytes(void);
+
 // Extern C function: string_new_with_length
 void* string_new_with_length(const char*, int);
 
 // Extern C function: malloc (libc-provided, declaration skipped)
 // Extern C function: free (libc-provided, declaration skipped)
-// Extern C function: malloc (libc-provided, declaration skipped)
-// Extern C function: zsync_io_open_rw_trunc
-int zsync_io_open_rw_trunc(const char*);
-
-// Extern C function: zsync_io_open_ro
-int zsync_io_open_ro(const char*);
-
-// Extern C function: zsync_io_pwrite
-int64_t zsync_io_pwrite(int, const char*, int64_t, int64_t);
-
-// Extern C function: zsync_io_pread_alloc
-const char* zsync_io_pread_alloc(int, int64_t, int64_t);
-
-// Extern C function: zsync_io_last_read_len
-int64_t zsync_io_last_read_len(void);
-
-// Extern C function: zsync_io_ftruncate
-int zsync_io_ftruncate(int, int64_t);
-
-// Extern C function: zsync_io_close
-int zsync_io_close(int);
-
-// Extern C function: zsync_io_fsync
-int zsync_io_fsync(int);
-
-// Extern C function: zsync_buf_alloc
-void* zsync_buf_alloc(int64_t);
-
-// Extern C function: zsync_buf_alloc_str
-const char* zsync_buf_alloc_str(int64_t);
-
-// Extern C function: zsync_buf_get
-int zsync_buf_get(void*, int64_t);
-
-// Extern C function: zsync_buf_set
-void zsync_buf_set(void*, int64_t, int);
-
-// Extern C function: zsync_buf_or
-void zsync_buf_or(void*, int64_t, int);
-
-// Extern C function: zsync_buf_free
-void zsync_buf_free(void*);
-
-// Extern C function: zsync_buf_identity
-const char* zsync_buf_identity(void*);
-
-// Extern C function: zsync_dup16
-const char* zsync_dup16(void*);
-
 
 // Import: std.string
 // Import: std.os
 // Import: std.fs
 // Import: cmd.mklib
-#line 312 "/home/paul/scm/aether/build/../std/fs/module.ae"
+// Import: rcksum.fileio
+#line 12 "cmd/zsyncmake.ae"
+const char* VERSION(void) {
+#line 13 "cmd/zsyncmake.ae"
+    return "0.7.1";
+}
+
+#line 331 "/home/paul/scm/aether/build/../std/fs/module.ae"
 static _tuple_int_string fs_mtime(const char* path) {
-#line 313 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 332 "/home/paul/scm/aether/build/../std/fs/module.ae"
 int m = file_mtime_raw(aether_string_data(path));
 if (m < 0) {
         {
-#line 315 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 334 "/home/paul/scm/aether/build/../std/fs/module.ae"
             return (_tuple_int_string){0, "cannot stat file"};
         }
     }
-#line 317 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 336 "/home/paul/scm/aether/build/../std/fs/module.ae"
     return (_tuple_int_string){m, ""};
 }
 
-#line 365 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 384 "/home/paul/scm/aether/build/../std/fs/module.ae"
 static const char* fs_mkdir_p(const char* path) {
-#line 366 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 385 "/home/paul/scm/aether/build/../std/fs/module.ae"
 int ok = fs_mkdir_p_raw(aether_string_data(path));
 if (ok == 0) {
         {
-#line 368 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 387 "/home/paul/scm/aether/build/../std/fs/module.ae"
             return "cannot mkdir -p";
         }
     }
-#line 370 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 389 "/home/paul/scm/aether/build/../std/fs/module.ae"
     return "";
 }
 
-#line 449 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 468 "/home/paul/scm/aether/build/../std/fs/module.ae"
 static const char* fs_write_binary(const char* path, const char* data, int length) {
-#line 450 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 469 "/home/paul/scm/aether/build/../std/fs/module.ae"
 int ok = fs_write_binary_raw(aether_string_data(path), aether_string_data(data), length);
 if (ok == 0) {
         {
-#line 452 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 471 "/home/paul/scm/aether/build/../std/fs/module.ae"
             return "binary write failed";
         }
     }
-#line 454 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 473 "/home/paul/scm/aether/build/../std/fs/module.ae"
     return "";
 }
 
-#line 515 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 534 "/home/paul/scm/aether/build/../std/fs/module.ae"
 static _tuple_string_int_string fs_read_binary(const char* path) {
-#line 521 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 540 "/home/paul/scm/aether/build/../std/fs/module.ae"
     return fs_read_binary_tuple(aether_string_data(path));
 }
 
@@ -1366,49 +1423,122 @@ static const char* mklib_int_str(int v) {
     return aether_uniform_heap_str((const char*)(string_from_int(v)), 1);
 }
 
+#line 85 "rcksum/fileio.ae"
+static void* fileio_buf_alloc(int n) {
+#line 86 "rcksum/fileio.ae"
+    return zsync_buf_alloc(n);
+}
+
+#line 99 "rcksum/fileio.ae"
+static void fileio_buf_set(void* b, int i, int v) {
+#line 100 "rcksum/fileio.ae"
+zsync_buf_set(b, i, v);
+}
+
+#line 114 "rcksum/fileio.ae"
+static const char* fileio_buf_to_str(void* b, int n) {
+    int _heap_s = 0; (void)_heap_s;
+    const char* s = NULL;
+#line 115 "rcksum/fileio.ae"
+s = string_new_with_length(fileio_buf_as_string(b), n);
+#line 119 "rcksum/fileio.ae"
+string_retain(s);
+#line 120 "rcksum/fileio.ae"
+    const char* _no_defer_ret = aether_uniform_heap_str((const char*)(s), _heap_s);
+    return _no_defer_ret;
+}
+
+#line 141 "rcksum/fileio.ae"
+static const char* fileio_pad_block(const char* src, int src_len, int start, int rem, int blocksize) {
+#line 142 "rcksum/fileio.ae"
+void* out = zsync_buf_alloc(blocksize);
+#line 143 "rcksum/fileio.ae"
+int i = 0;
+while (i < rem) {
+        {
+#line 145 "rcksum/fileio.ae"
+zsync_buf_set(out, i, (string_char_at_n(src, src_len, (start + i)) & 0xff));
+#line 146 "rcksum/fileio.ae"
+i = (i + 1);
+        }
+    }
+#line 148 "rcksum/fileio.ae"
+    return aether_uniform_heap_str((const char*)(string_new_with_length(fileio_buf_as_string(out), blocksize)), 1);
+}
+
+#line 155 "rcksum/fileio.ae"
+static const char* fileio_slice(const char* src, int src_len, int start, int len) {
+#line 156 "rcksum/fileio.ae"
+void* out = zsync_buf_alloc(len);
+#line 157 "rcksum/fileio.ae"
+int i = 0;
+while (i < len) {
+        {
+#line 159 "rcksum/fileio.ae"
+zsync_buf_set(out, i, (string_char_at_n(src, src_len, (start + i)) & 0xff));
+#line 160 "rcksum/fileio.ae"
+i = (i + 1);
+        }
+    }
+#line 162 "rcksum/fileio.ae"
+    return aether_uniform_heap_str((const char*)(string_new_with_length(fileio_buf_as_string(out), len)), 1);
+}
+
+#line 167 "rcksum/fileio.ae"
+static const char* fileio_buf_as_string(void* b) {
+#line 168 "rcksum/fileio.ae"
+    return zsync_buf_identity(b);
+}
+
+#line 176 "rcksum/fileio.ae"
+static const char* fileio_rfc1123z(int epoch) {
+#line 177 "rcksum/fileio.ae"
+    return zsync_rfc1123z(epoch);
+}
+
 // Import: std.math
 // Import: std.cryptography
-#line 72 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 80 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 static _tuple_string_string cryptography_sha1_hex(const char* data, int length) {
     int _heap_out = 0; (void)_heap_out;
     const char* out = NULL;
-#line 73 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 81 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 { const char* _tmp_old = out; out = cryptography_sha1_hex_raw(aether_string_data(data), length); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 0; }
 if (out == 0) {
         {
-#line 75 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 83 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
             return (_tuple_string_string){"", "openssl unavailable"};
         }
     }
-#line 77 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 85 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
     return (_tuple_string_string){out, ""};
 }
 
-#line 236 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 244 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 static _tuple_string_int_string cryptography_md4_bytes(const char* data, int length) {
     int _heap_raw = 0; (void)_heap_raw;
     const char* raw = NULL;
     int _heap_owned = 0; (void)_heap_owned;
     const char* owned = NULL;
-#line 237 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 245 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 int ok = cryptography_md4_bytes_raw(aether_string_data(data), length);
 if (ok == 0) {
         {
-#line 239 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 247 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
             _tuple_string_int_string _builder_ret = (_tuple_string_int_string){aether_uniform_heap_str((const char*)(""), 0), 0, "md4 unavailable"};
             /* deferred */ if (_heap_raw) { aether_heap_str_free(raw); raw = NULL; _heap_raw = 0; }
             return _builder_ret;
         }
     }
-#line 241 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 249 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 { const char* _tmp_old = raw; raw = cryptography_get_binary_digest(); if (_heap_raw) aether_heap_str_free(_tmp_old); _heap_raw = 0; }
-#line 242 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 250 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 int n = cryptography_get_binary_digest_length();
-#line 243 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 251 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 { const char* _tmp_old = owned; owned = string_new_with_length(raw, n); if (_heap_owned) aether_heap_str_free(_tmp_old); _heap_owned = 1; }
-#line 244 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 252 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 cryptography_release_binary_digest();
-#line 245 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 253 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
     _tuple_string_int_string _builder_ret = (_tuple_string_int_string){aether_uniform_heap_str((const char*)(owned), _heap_owned), n, ""};
     /* deferred */ if (_heap_raw) { aether_heap_str_free(raw); raw = NULL; _heap_raw = 0; }
     return _builder_ret;
@@ -1500,74 +1630,6 @@ static int checksums_byte_at(const char* data, int data_len, int i) {
     return (string_char_at_n(data, data_len, i) & 0xff);
 }
 
-// Import: rcksum.fileio
-#line 79 "rcksum/fileio.ae"
-static void* fileio_buf_alloc(int n) {
-#line 80 "rcksum/fileio.ae"
-    return zsync_buf_alloc(n);
-}
-
-#line 93 "rcksum/fileio.ae"
-static void fileio_buf_set(void* b, int i, int v) {
-#line 94 "rcksum/fileio.ae"
-zsync_buf_set(b, i, v);
-}
-
-#line 108 "rcksum/fileio.ae"
-static const char* fileio_buf_to_str(void* b, int n) {
-    int _heap_s = 0; (void)_heap_s;
-    const char* s = NULL;
-#line 109 "rcksum/fileio.ae"
-s = string_new_with_length(fileio_buf_as_string(b), n);
-#line 113 "rcksum/fileio.ae"
-string_retain(s);
-#line 114 "rcksum/fileio.ae"
-    const char* _no_defer_ret = aether_uniform_heap_str((const char*)(s), _heap_s);
-    return _no_defer_ret;
-}
-
-#line 135 "rcksum/fileio.ae"
-static const char* fileio_pad_block(const char* src, int src_len, int start, int rem, int blocksize) {
-#line 136 "rcksum/fileio.ae"
-void* out = zsync_buf_alloc(blocksize);
-#line 137 "rcksum/fileio.ae"
-int i = 0;
-while (i < rem) {
-        {
-#line 139 "rcksum/fileio.ae"
-zsync_buf_set(out, i, (string_char_at_n(src, src_len, (start + i)) & 0xff));
-#line 140 "rcksum/fileio.ae"
-i = (i + 1);
-        }
-    }
-#line 142 "rcksum/fileio.ae"
-    return aether_uniform_heap_str((const char*)(string_new_with_length(fileio_buf_as_string(out), blocksize)), 1);
-}
-
-#line 149 "rcksum/fileio.ae"
-static const char* fileio_slice(const char* src, int src_len, int start, int len) {
-#line 150 "rcksum/fileio.ae"
-void* out = zsync_buf_alloc(len);
-#line 151 "rcksum/fileio.ae"
-int i = 0;
-while (i < len) {
-        {
-#line 153 "rcksum/fileio.ae"
-zsync_buf_set(out, i, (string_char_at_n(src, src_len, (start + i)) & 0xff));
-#line 154 "rcksum/fileio.ae"
-i = (i + 1);
-        }
-    }
-#line 156 "rcksum/fileio.ae"
-    return aether_uniform_heap_str((const char*)(string_new_with_length(fileio_buf_as_string(out), len)), 1);
-}
-
-#line 161 "rcksum/fileio.ae"
-static const char* fileio_buf_as_string(void* b) {
-#line 162 "rcksum/fileio.ae"
-    return zsync_buf_identity(b);
-}
-
 int main(int argc, char** argv) {
     #ifdef _WIN32
     SetConsoleOutputCP(65001);  // CP_UTF8
@@ -1591,91 +1653,128 @@ int main(int argc, char** argv) {
     const char* data = NULL;
     int _heap_e = 0; (void)_heap_e;
     const char* e = NULL;
+    int _heap_mtime = 0; (void)_heap_mtime;
+    const char* mtime = NULL;
+    int _heap_merr = 0; (void)_heap_merr;
+    const char* merr = NULL;
     int _heap_content = 0; (void)_heap_content;
     const char* content = NULL;
     int _heap_werr = 0; (void)_heap_werr;
     const char* werr = NULL;
     {
-#line 12 "cmd/zsyncmake.ae"
-int argc = aether_args_count();
-#line 14 "cmd/zsyncmake.ae"
-int blocksize = 0;
-#line 15 "cmd/zsyncmake.ae"
-{ const char* _tmp_old = out; out = ""; if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 0; }
-#line 16 "cmd/zsyncmake.ae"
-{ const char* _tmp_old = url; url = ""; if (_heap_url) aether_heap_str_free(_tmp_old); _heap_url = 0; }
 #line 17 "cmd/zsyncmake.ae"
-{ const char* _tmp_old = fname; fname = ""; if (_heap_fname) aether_heap_str_free(_tmp_old); _heap_fname = 0; }
+int argc = aether_args_count();
 #line 18 "cmd/zsyncmake.ae"
-input = "";
+int blocksize = 0;
 #line 19 "cmd/zsyncmake.ae"
+{ const char* _tmp_old = out; out = ""; if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 0; }
+#line 20 "cmd/zsyncmake.ae"
+{ const char* _tmp_old = url; url = ""; if (_heap_url) aether_heap_str_free(_tmp_old); _heap_url = 0; }
+#line 21 "cmd/zsyncmake.ae"
+{ const char* _tmp_old = fname; fname = ""; if (_heap_fname) aether_heap_str_free(_tmp_old); _heap_fname = 0; }
+#line 22 "cmd/zsyncmake.ae"
+input = "";
+#line 23 "cmd/zsyncmake.ae"
+int verbose = 0;
+#line 24 "cmd/zsyncmake.ae"
 int i = 1;
 while (i < argc) {
             {
-#line 21 "cmd/zsyncmake.ae"
+#line 26 "cmd/zsyncmake.ae"
 { const char* _tmp_old = a; a = aether_args_get(i); if (_heap_a) aether_heap_str_free(_tmp_old); _heap_a = 0; }
 if (string_equals(a, "-b") == 1) {
                     {
-#line 23 "cmd/zsyncmake.ae"
+#line 28 "cmd/zsyncmake.ae"
 i = (i + 1);
-#line 24 "cmd/zsyncmake.ae"
+#line 29 "cmd/zsyncmake.ae"
 blocksize = parse_int_arg(aether_args_get(i));
                     }
                 } else {
 if (string_equals(a, "-o") == 1) {
                         {
-#line 26 "cmd/zsyncmake.ae"
+#line 31 "cmd/zsyncmake.ae"
 i = (i + 1);
-#line 27 "cmd/zsyncmake.ae"
+#line 32 "cmd/zsyncmake.ae"
 { const char* _tmp_old = out; out = aether_args_get(i); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 0; }
                         }
                     } else {
 if (string_equals(a, "-u") == 1) {
                             {
-#line 29 "cmd/zsyncmake.ae"
+#line 34 "cmd/zsyncmake.ae"
 i = (i + 1);
-#line 30 "cmd/zsyncmake.ae"
+#line 35 "cmd/zsyncmake.ae"
 { const char* _tmp_old = url; url = aether_args_get(i); if (_heap_url) aether_heap_str_free(_tmp_old); _heap_url = 0; }
                             }
                         } else {
 if (string_equals(a, "-f") == 1) {
                                 {
-#line 32 "cmd/zsyncmake.ae"
+#line 37 "cmd/zsyncmake.ae"
 i = (i + 1);
-#line 33 "cmd/zsyncmake.ae"
+#line 38 "cmd/zsyncmake.ae"
 { const char* _tmp_old = fname; fname = aether_args_get(i); if (_heap_fname) aether_heap_str_free(_tmp_old); _heap_fname = 0; }
                                 }
                             } else {
-                                {
-#line 35 "cmd/zsyncmake.ae"
+if (string_equals(a, "-v") == 1) {
+                                    {
+#line 40 "cmd/zsyncmake.ae"
+verbose = 1;
+                                    }
+                                } else {
+if (string_equals(a, "-V") == 1) {
+                                        {
+#line 42 "cmd/zsyncmake.ae"
+printf("zsyncmake v%s", _aether_safe_str(VERSION())); putchar('\n');
+#line 43 "cmd/zsyncmake.ae"
+exit(0);
+                                        }
+                                    } else {
+if (string_equals(a, "-e") == 1) {
+                                            {
+                                            }
+                                        } else {
+if (string_equals(a, "-z") == 1) {
+                                                {
+                                                }
+                                            } else {
+if (string_equals(a, "-Z") == 1) {
+                                                    {
+                                                    }
+                                                } else {
+                                                    {
+#line 51 "cmd/zsyncmake.ae"
 { input = a; _heap_input = _heap_a; _heap_a = 0; }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
-#line 37 "cmd/zsyncmake.ae"
+#line 53 "cmd/zsyncmake.ae"
 i = (i + 1);
             }
         }
 if (string_equals(input, "") == 1) {
             {
-#line 41 "cmd/zsyncmake.ae"
-puts("usage: zsyncmake [-b N] [-o out] [-u url] [-f name] input");
-#line 42 "cmd/zsyncmake.ae"
+#line 57 "cmd/zsyncmake.ae"
+puts("usage: zsyncmake [-b N] [-o out] [-u url] [-f name] [-v] [-V] input");
+#line 58 "cmd/zsyncmake.ae"
 exit(2);
             }
         }
-#line 45 "cmd/zsyncmake.ae"
+#line 61 "cmd/zsyncmake.ae"
         _tuple_string_int_string _tup5 = fs_read_binary(input);
         { const char* _tmp_old = data; data = _tup5._0; if (_heap_data) aether_heap_str_free(_tmp_old); _heap_data = 1; }
         int dlen = _tup5._1;
         { const char* _tmp_old = e; e = _tup5._2; if (_heap_e) aether_heap_str_free(_tmp_old); _heap_e = 0; }
 if (strcmp(_aether_safe_str(e), _aether_safe_str("")) != 0) {
             {
-#line 47 "cmd/zsyncmake.ae"
+#line 63 "cmd/zsyncmake.ae"
 printf("open: %s", _aether_safe_str(e)); putchar('\n');
-#line 48 "cmd/zsyncmake.ae"
+#line 64 "cmd/zsyncmake.ae"
 exit(2);
             }
         }
@@ -1683,12 +1782,12 @@ if (blocksize == 0) {
             {
 if (dlen < 100000000) {
                     {
-#line 53 "cmd/zsyncmake.ae"
+#line 69 "cmd/zsyncmake.ae"
 blocksize = 2048;
                     }
                 } else {
                     {
-#line 55 "cmd/zsyncmake.ae"
+#line 71 "cmd/zsyncmake.ae"
 blocksize = 4096;
                     }
                 }
@@ -1696,33 +1795,53 @@ blocksize = 4096;
         }
 if (strcmp(_aether_safe_str(fname), _aether_safe_str("")) == 0) {
             {
-#line 59 "cmd/zsyncmake.ae"
+#line 75 "cmd/zsyncmake.ae"
 { const char* _tmp_old = fname; fname = basename(input); if (_heap_fname) aether_heap_str_free(_tmp_old); _heap_fname = 1; }
             }
         }
 if (string_equals(out, "") == 1) {
             {
-#line 62 "cmd/zsyncmake.ae"
+#line 78 "cmd/zsyncmake.ae"
 { const char* _tmp_old = out; out = string_concat(fname, ".zsync"); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 1; }
             }
         }
-#line 65 "cmd/zsyncmake.ae"
-        _tuple_string_int _tup6 = mklib_generate_n(data, dlen, blocksize, fname, "", url);
-        { const char* _tmp_old = content; content = _tup6._0; if (_heap_content) aether_heap_str_free(_tmp_old); _heap_content = 1; }
-        int clen = _tup6._1;
-#line 66 "cmd/zsyncmake.ae"
+#line 83 "cmd/zsyncmake.ae"
+{ const char* _tmp_old = mtime; mtime = ""; if (_heap_mtime) aether_heap_str_free(_tmp_old); _heap_mtime = 0; }
+#line 84 "cmd/zsyncmake.ae"
+        _tuple_int_string _tup6 = fs_mtime(input);
+        int epoch = _tup6._0;
+        { const char* _tmp_old = merr; merr = _tup6._1; if (_heap_merr) aether_heap_str_free(_tmp_old); _heap_merr = 0; }
+if (strcmp(_aether_safe_str(merr), _aether_safe_str("")) == 0) {
+            {
+#line 86 "cmd/zsyncmake.ae"
+{ const char* _tmp_old = mtime; mtime = fileio_rfc1123z(epoch); if (_heap_mtime) aether_heap_str_free(_tmp_old); _heap_mtime = 0; }
+            }
+        }
+#line 89 "cmd/zsyncmake.ae"
+        _tuple_string_int _tup7 = mklib_generate_n(data, dlen, blocksize, fname, mtime, url);
+        { const char* _tmp_old = content; content = _tup7._0; if (_heap_content) aether_heap_str_free(_tmp_old); _heap_content = 1; }
+        int clen = _tup7._1;
+#line 90 "cmd/zsyncmake.ae"
 { const char* _tmp_old = werr; werr = fs_write_binary(out, content, clen); if (_heap_werr) aether_heap_str_free(_tmp_old); _heap_werr = 0; }
 if (strcmp(_aether_safe_str(werr), _aether_safe_str("")) != 0) {
             {
-#line 68 "cmd/zsyncmake.ae"
+#line 92 "cmd/zsyncmake.ae"
 printf("write: %s", _aether_safe_str(werr)); putchar('\n');
-#line 69 "cmd/zsyncmake.ae"
+#line 93 "cmd/zsyncmake.ae"
 exit(2);
+            }
+        }
+if (verbose == 1) {
+            {
+#line 96 "cmd/zsyncmake.ae"
+printf("Created .zsync with %d blocks", (dlen / blocksize)); putchar('\n');
             }
         }
     }
     /* deferred */ if (_heap_werr) { aether_heap_str_free(werr); werr = NULL; _heap_werr = 0; }
     /* deferred */ if (_heap_content) { aether_heap_str_free(content); content = NULL; _heap_content = 0; }
+    /* deferred */ if (_heap_merr) { aether_heap_str_free(merr); merr = NULL; _heap_merr = 0; }
+    /* deferred */ if (_heap_mtime) { aether_heap_str_free(mtime); mtime = NULL; _heap_mtime = 0; }
     /* deferred */ if (_heap_e) { aether_heap_str_free(e); e = NULL; _heap_e = 0; }
     /* deferred */ if (_heap_data) { aether_heap_str_free(data); data = NULL; _heap_data = 0; }
     /* deferred */ if (_heap_a) { aether_heap_str_free(a); a = NULL; _heap_a = 0; }
@@ -1731,47 +1850,47 @@ exit(2);
     /* deferred */ if (_heap_out) { aether_heap_str_free(out); out = NULL; _heap_out = 0; }
     return 0;
 }
-#line 73 "cmd/zsyncmake.ae"
+#line 100 "cmd/zsyncmake.ae"
 int parse_int_arg(const char* s) {
-#line 74 "cmd/zsyncmake.ae"
+#line 101 "cmd/zsyncmake.ae"
 int ok = string_try_long(s);
 if (ok == 0) {
         {
-#line 76 "cmd/zsyncmake.ae"
+#line 103 "cmd/zsyncmake.ae"
             return 0;
         }
     }
-#line 78 "cmd/zsyncmake.ae"
+#line 105 "cmd/zsyncmake.ae"
     return string_get_long(s);
 }
 
-#line 82 "cmd/zsyncmake.ae"
+#line 109 "cmd/zsyncmake.ae"
 const char* basename(const char* p) {
-#line 83 "cmd/zsyncmake.ae"
+#line 110 "cmd/zsyncmake.ae"
 int n = string_length(p);
-#line 84 "cmd/zsyncmake.ae"
+#line 111 "cmd/zsyncmake.ae"
 int last = -1;
-#line 85 "cmd/zsyncmake.ae"
+#line 112 "cmd/zsyncmake.ae"
 int i = 0;
 while (i < n) {
         {
 if ((string_char_at(p, i) & 0xff) == 47) {
                 {
-#line 88 "cmd/zsyncmake.ae"
+#line 115 "cmd/zsyncmake.ae"
 last = i;
                 }
             }
-#line 90 "cmd/zsyncmake.ae"
+#line 117 "cmd/zsyncmake.ae"
 i = (i + 1);
         }
     }
 if (last < 0) {
         {
-#line 93 "cmd/zsyncmake.ae"
+#line 120 "cmd/zsyncmake.ae"
             return aether_uniform_heap_str((const char*)(p), 0);
         }
     }
-#line 95 "cmd/zsyncmake.ae"
+#line 122 "cmd/zsyncmake.ae"
     return aether_uniform_heap_str((const char*)(string_substring(p, (last + 1), n)), 1);
 }
 

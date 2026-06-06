@@ -466,6 +466,12 @@ void zsync_buf_free(void*);
 // Extern C function: zsync_buf_identity
 const char* zsync_buf_identity(void*);
 
+// Extern C function: zsync_rfc1123z
+const char* zsync_rfc1123z(int64_t);
+
+// Extern C function: zsync_parse_rfc1123
+int64_t zsync_parse_rfc1123(const char*);
+
 // Extern C function: zsync_dup16
 const char* zsync_dup16(void*);
 
@@ -474,62 +480,62 @@ const char* zsync_dup16(void*);
 // Import: std.string
 // Import: rcksum.fileio
 // Import: test.assert
-#line 23 "rcksum/fileio.ae"
+#line 29 "rcksum/fileio.ae"
 static int fileio_open_rw(const char* path) {
-#line 24 "rcksum/fileio.ae"
+#line 30 "rcksum/fileio.ae"
     return zsync_io_open_rw_trunc(aether_string_data(path));
 }
 
-#line 36 "rcksum/fileio.ae"
+#line 42 "rcksum/fileio.ae"
 static int fileio_write_at(int fd, const char* data, int len, int offset) {
-#line 37 "rcksum/fileio.ae"
+#line 43 "rcksum/fileio.ae"
 int64_t written = zsync_io_pwrite(fd, aether_string_data(data), len, offset);
-#line 38 "rcksum/fileio.ae"
+#line 44 "rcksum/fileio.ae"
     return written;
 }
 
-#line 44 "rcksum/fileio.ae"
+#line 50 "rcksum/fileio.ae"
 static _tuple_string_int fileio_read_at(int fd, int len, int offset) {
     int _heap_buf = 0; (void)_heap_buf;
     const char* buf = NULL;
     int _heap_s = 0; (void)_heap_s;
     const char* s = NULL;
-#line 45 "rcksum/fileio.ae"
+#line 51 "rcksum/fileio.ae"
 { const char* _tmp_old = buf; buf = zsync_io_pread_alloc(fd, len, offset); if (_heap_buf) aether_heap_str_free(_tmp_old); _heap_buf = 0; }
-#line 46 "rcksum/fileio.ae"
+#line 52 "rcksum/fileio.ae"
 int64_t n = zsync_io_last_read_len();
 if (n < 0) {
         {
-#line 48 "rcksum/fileio.ae"
+#line 54 "rcksum/fileio.ae"
             _tuple_string_int _builder_ret = (_tuple_string_int){aether_uniform_heap_str((const char*)(""), 0), (-(1))};
             /* deferred */ if (_heap_buf) { aether_heap_str_free(buf); buf = NULL; _heap_buf = 0; }
             return _builder_ret;
         }
     }
-#line 52 "rcksum/fileio.ae"
+#line 58 "rcksum/fileio.ae"
 { const char* _tmp_old = s; s = string_new_with_length(buf, n); if (_heap_s) aether_heap_str_free(_tmp_old); _heap_s = 1; }
-#line 53 "rcksum/fileio.ae"
+#line 59 "rcksum/fileio.ae"
     _tuple_string_int _builder_ret = (_tuple_string_int){aether_uniform_heap_str((const char*)(s), _heap_s), n};
     /* deferred */ if (_heap_buf) { aether_heap_str_free(buf); buf = NULL; _heap_buf = 0; }
     return _builder_ret;
     /* deferred */ if (_heap_buf) { aether_heap_str_free(buf); buf = NULL; _heap_buf = 0; }
 }
 
-#line 56 "rcksum/fileio.ae"
+#line 62 "rcksum/fileio.ae"
 static int fileio_truncate_to(int fd, int length) {
-#line 57 "rcksum/fileio.ae"
+#line 63 "rcksum/fileio.ae"
     return zsync_io_ftruncate(fd, length);
 }
 
-#line 60 "rcksum/fileio.ae"
+#line 66 "rcksum/fileio.ae"
 static int fileio_close_fd(int fd) {
-#line 61 "rcksum/fileio.ae"
+#line 67 "rcksum/fileio.ae"
     return zsync_io_close(fd);
 }
 
-#line 64 "rcksum/fileio.ae"
+#line 70 "rcksum/fileio.ae"
 static int fileio_sync_fd(int fd) {
-#line 65 "rcksum/fileio.ae"
+#line 71 "rcksum/fileio.ae"
     return zsync_io_fsync(fd);
 }
 

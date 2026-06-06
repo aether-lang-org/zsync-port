@@ -5,9 +5,12 @@
 // control file, reusing local data (seed files) and fetching only the
 // missing byte ranges over HTTP. Thin CLI over cmd.clientlib.
 //
-// Usage: zsync [-o output] [-i seedfile] <url-or-path-to-.zsync>
+// Usage:
+//   zsync [-o output] [-i seedfile]... [-A host=user:pass] [-k keep.zsync]
+//         [-q] [-v] [-V] [--no-check-certificate] <url-or-path-to-.zsync>
 
 import std.string (*)
+import std.list (*)
 import std.os (*)
 import std.fs
 import std.http.client
@@ -16,11 +19,20 @@ import zsync.download
 import cmd.clientlib
 import rcksum.fileio
 
+VERSION() -> string {
+    return "0.7.1"
+}
+
 main() {
     argc = aether_args_count()
     out = ""
-    seed = ""
+    seeds = list_new()
+    auth_creds = ""      // "user:pass" from -A host=user:pass
+    keep = ""            // -k path
+    quiet = 0
+    verbose = 0
     source = ""
+
     i = 1
     while i < argc {
         a = aether_args_get(i)
@@ -29,7 +41,24 @@ main() {
             out = aether_args_get(i)
         } else if string_equals(a, "-i") == 1 {
             i = i + 1
-            seed = aether_args_get(i)
+            list_add_raw(seeds, str_owned(aether_args_get(i)))
+        } else if string_equals(a, "-A") == 1 {
+            i = i + 1
+            auth_creds = creds_of(aether_args_get(i))
+        } else if string_equals(a, "-k") == 1 {
+            i = i + 1
+            keep = aether_args_get(i)
+        } else if string_equals(a, "-q") == 1 {
+            quiet = 1
+        } else if string_equals(a, "-v") == 1 {
+            verbose = 1
+        } else if string_equals(a, "-V") == 1 {
+            println("zsync v${VERSION()}")
+            exit(0)
+        } else if string_equals(a, "--no-check-certificate") == 1 {
+            // Accepted for CLI compatibility. The std.http client does
+            // not yet expose a TLS-verify-skip toggle, so this is a
+            // no-op today (TODO: wire when the client gains the option).
         } else {
             source = a
         }
@@ -37,12 +66,14 @@ main() {
     }
 
     if string_equals(source, "") == 1 {
-        println("usage: zsync [-o output] [-i seedfile] <.zsync url-or-path>")
+        println("usage: zsync [-o out] [-i seed]... [-A host=user:pass] [-k keep] [-q] [-v] [-V] <.zsync>")
         exit(3)
     }
 
-    // 1. fetch + parse the control file
-    cbytes, clen, cerr = clientlib.fetch_control(source)
+    auth = clientlib.basic_auth(auth_creds)
+
+    // 1. fetch + parse the control file (with -k If-Modified-Since reuse)
+    cbytes, clen, cerr = get_control(source, keep, auth, quiet)
     if cerr != "" {
         println("failed to fetch control file: ${cerr}")
         exit(3)
@@ -53,7 +84,7 @@ main() {
         exit(3)
     }
 
-    // 2. pick output filename
+    // 2. output filename
     if string_equals(out, "") == 1 {
         out = control.ctl_filename(ctl)
         if string_equals(out, "") == 1 {
@@ -61,7 +92,6 @@ main() {
         }
     }
 
-    // 3. open the output file & state
     fd = fileio.open_rw(out)
     if fd < 0 {
         println("cannot open output ${out}")
@@ -69,67 +99,155 @@ main() {
     }
     st = download.new_state(ctl, fd)
 
-    // 4. seed from local data, if given (and from the existing output)
-    if string_equals(seed, "") == 0 {
-        if fs.exists(seed) == 1 {
-            sdata, slen, se = fs.read_binary(seed)
-            if se == "" {
-                download.submit_source(st, sdata, slen)
-            }
+    // 3. seed from the existing output/temp first, then the -i files.
+    //    (The existing target is the most useful seed if a prior run
+    //    left one.)
+    feed_seed_if_exists(st, out, quiet)
+    ns = list_size(seeds)
+    si = 0
+    while si < ns {
+        sf = fileio.buf_as_string(list_get_raw(seeds, si))
+        feed_seed_if_exists(st, sf, quiet)
+        si = si + 1
+    }
+
+    if download.status(st) == 0 {
+        if quiet == 0 {
+            println("No relevant local data — downloading the whole file.")
         }
     }
 
-    // 5. fetch the missing ranges from the first URL in the control file
-    url = first_url(ctl, source)
-    if string_equals(url, "") == 1 {
-        println("no download URL known")
-        exit(3)
-    }
-    ferr = clientlib.fetch_remaining(st, url)
+    // 4. fetch the missing ranges, trying each URL until one succeeds.
+    ferr = fetch_from_urls(st, ctl, source, auth, quiet)
     if ferr != "" {
         println("download failed: ${ferr}")
         exit(3)
     }
 
-    // 6. finalize + verify
+    // 5. finalize + verify
     cerr2 = download.complete(st)
     fileio.close_fd(fd)
     if cerr2 != "" {
         println("verification failed: ${cerr2}")
         exit(2)
     }
-    got, total = download.progress(st)
-    println("download complete: ${out}")
+    if quiet == 0 {
+        println("verifying download...checksum matches OK")
+        got, total = download.progress(st)
+        println("download complete: ${out}")
+    }
+    if verbose == 1 {
+        s = download.stats_line(st)
+        println(s)
+    }
 }
 
-// Resolve the download URL. Uses the first URL header; if it is
-// relative and `source` is an http URL, resolve against source's dir.
-first_url(ctl: ptr, source: string) -> string {
+// Fetch the control file. If -k is set and a local copy exists, send
+// If-Modified-Since and reuse the local copy on 304. On a fresh fetch
+// with -k set, save the downloaded control file to the keep path.
+get_control(source: string, keep: string, auth: string, quiet: int) -> (string, int, string) {
+    // local .zsync path takes precedence
+    if fs.exists(source) == 1 {
+        return fs.read_binary(source)
+    }
+    ims = ""
+    if string_equals(keep, "") == 0 {
+        if fs.exists(keep) == 1 {
+            epoch, me = fs.mtime(keep)
+            if me == "" {
+                ims = fileio.rfc1123z(epoch)
+            }
+        }
+    }
+    body, n, status, e = clientlib.http_get_auth(source, auth, ims)
+    if status == 304 {
+        if quiet == 0 {
+            println("control file not modified — using local copy")
+        }
+        return fs.read_binary(keep)
+    }
+    if e != "" {
+        return "", 0, e
+    }
+    if string_equals(keep, "") == 0 {
+        fs.write_binary(keep, body, n)
+    }
+    return body, n, ""
+}
+
+// Try each URL in the control file (relative URLs resolved against the
+// source) until the download completes. Mirrors the Go failover, minus
+// the randomisation (deterministic order is friendlier to test).
+fetch_from_urls(st: ptr, ctl: ptr, source: string, auth: string, quiet: int) -> string {
     urls = control.ctl_urls(ctl)
     if urls == null {
-        return ""
+        return "no download URLs known"
     }
-    n = url_count(urls)
+    n = list_size(urls)
     if n == 0 {
+        return "no download URLs known"
+    }
+    last_err = "no download URLs known"
+    i = 0
+    while i < n {
+        if download.status(st) >= 2 {
+            return ""
+        }
+        u = resolve(fileio.buf_as_string(list_get_raw(urls, i)), source)
+        if quiet == 0 {
+            println("downloading new blocks from ${u}")
+        }
+        e = clientlib.fetch_remaining(st, u, auth)
+        if e == "" {
+            return ""
+        }
+        last_err = e
+        if quiet == 0 {
+            println("failed from ${u}: ${e}")
+        }
+        i = i + 1
+    }
+    if download.status(st) >= 2 {
         return ""
     }
-    u = url_at(urls, 0)
+    return last_err
+}
+
+feed_seed_if_exists(st: ptr, path: string, quiet: int) {
+    if fs.exists(path) == 0 {
+        return
+    }
+    data, n, e = fs.read_binary(path)
+    if e != "" {
+        return
+    }
+    if quiet == 0 {
+        println("reading seed file ${path}")
+    }
+    download.submit_source(st, data, n)
+}
+
+// -A value is "host=user:pass"; return "user:pass" (we apply a single
+// credential to all fetches — simplification of Go's per-host map).
+creds_of(v: string) -> string {
+    eq = string_index_of(v, "=")
+    if eq < 0 {
+        return v
+    }
+    return string_substring(v, eq + 1, string_length(v))
+}
+
+// Resolve a (possibly relative) URL from the control file against the
+// source URL's directory.
+resolve(u: string, source: string) -> string {
     if is_abs(u) == 1 {
         return u
     }
-    // relative: resolve against source's directory
-    return join_url(source, u)
-}
-
-extern list_size(l: ptr) -> int
-extern list_get_raw(l: ptr, i: int) -> ptr
-
-url_count(l: ptr) -> int {
-    return list_size(l)
-}
-
-url_at(l: ptr, i: int) -> string {
-    return fileio.buf_as_string(list_get_raw(l, i))
+    last = last_slash(source)
+    if last < 0 {
+        return u
+    }
+    return string_concat(string_substring(source, 0, last + 1), u)
 }
 
 is_abs(u: string) -> int {
@@ -142,19 +260,20 @@ is_abs(u: string) -> int {
     return 0
 }
 
-// Replace the last path component of `base` with `rel`.
-join_url(base: string, rel: string) -> string {
-    n = string_length(base)
+last_slash(s: string) -> int {
+    n = string_length(s)
     last = 0 - 1
     i = 0
     while i < n {
-        if (string_char_at(base, i) & 0xff) == 47 {
+        if (string_char_at(s, i) & 0xff) == 47 {
             last = i
         }
         i = i + 1
     }
-    if last < 0 {
-        return rel
-    }
-    return string_concat(string_substring(base, 0, last + 1), rel)
+    return last
+}
+
+// Copy an argv string so it survives in the seeds list.
+str_owned(s: string) -> string {
+    return string_concat(s, "")
 }

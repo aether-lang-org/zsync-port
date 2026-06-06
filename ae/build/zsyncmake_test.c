@@ -611,6 +611,36 @@ const char* path_extension(const char*);
 // Extern C function: path_is_absolute
 int path_is_absolute(const char*);
 
+// Extern C function: path_clean
+const char* path_clean(const char*);
+
+// Extern C function: path_is_within_base
+int path_is_within_base(const char*, const char*);
+
+// Extern C function: path_rel
+const char* path_rel(const char*, const char*);
+
+// Extern C function: fs_pwrite_raw
+int64_t fs_pwrite_raw(void*, const char*, int, int64_t);
+
+// Extern C function: fs_pread_raw
+int fs_pread_raw(void*, int, int64_t);
+
+// Extern C function: fs_get_pread
+const char* fs_get_pread(void);
+
+// Extern C function: fs_get_pread_length
+int fs_get_pread_length(void);
+
+// Extern C function: fs_release_pread
+void fs_release_pread(void);
+
+// Extern C function: fs_ftruncate_raw
+const char* fs_ftruncate_raw(void*, int64_t);
+
+// Extern C function: fs_fsync_raw
+const char* fs_fsync_raw(void*);
+
 // Extern C function: fs_glob_raw
 void* fs_glob_raw(const char*);
 
@@ -786,6 +816,18 @@ int cryptography_get_binary_digest_length(void);
 // Extern C function: cryptography_release_binary_digest
 void cryptography_release_binary_digest(void);
 
+// Extern C function: cryptography_random_bytes_raw
+int cryptography_random_bytes_raw(int);
+
+// Extern C function: cryptography_get_random_bytes
+const char* cryptography_get_random_bytes(void);
+
+// Extern C function: cryptography_get_random_bytes_length
+int cryptography_get_random_bytes_length(void);
+
+// Extern C function: cryptography_release_random_bytes
+void cryptography_release_random_bytes(void);
+
 // Extern C function: string_new_with_length
 void* string_new_with_length(const char*, int);
 
@@ -929,6 +971,12 @@ void zsync_buf_free(void*);
 // Extern C function: zsync_buf_identity
 const char* zsync_buf_identity(void*);
 
+// Extern C function: zsync_rfc1123z
+const char* zsync_rfc1123z(int64_t);
+
+// Extern C function: zsync_parse_rfc1123
+int64_t zsync_parse_rfc1123(const char*);
+
 // Extern C function: zsync_dup16
 const char* zsync_dup16(void*);
 
@@ -937,23 +985,23 @@ const char* zsync_dup16(void*);
 // Import: std.fs
 // Import: cmd.mklib
 // Import: test.assert
-#line 312 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 331 "/home/paul/scm/aether/build/../std/fs/module.ae"
 static _tuple_int_string fs_mtime(const char* path) {
-#line 313 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 332 "/home/paul/scm/aether/build/../std/fs/module.ae"
 int m = file_mtime_raw(aether_string_data(path));
 if (m < 0) {
         {
-#line 315 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 334 "/home/paul/scm/aether/build/../std/fs/module.ae"
             return (_tuple_int_string){0, "cannot stat file"};
         }
     }
-#line 317 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 336 "/home/paul/scm/aether/build/../std/fs/module.ae"
     return (_tuple_int_string){m, ""};
 }
 
-#line 515 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 534 "/home/paul/scm/aether/build/../std/fs/module.ae"
 static _tuple_string_int_string fs_read_binary(const char* path) {
-#line 521 "/home/paul/scm/aether/build/../std/fs/module.ae"
+#line 540 "/home/paul/scm/aether/build/../std/fs/module.ae"
     return fs_read_binary_tuple(aether_string_data(path));
 }
 
@@ -1437,47 +1485,47 @@ exit(1);
 
 // Import: std.math
 // Import: std.cryptography
-#line 72 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 80 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 static _tuple_string_string cryptography_sha1_hex(const char* data, int length) {
     int _heap_out = 0; (void)_heap_out;
     const char* out = NULL;
-#line 73 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 81 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 { const char* _tmp_old = out; out = cryptography_sha1_hex_raw(aether_string_data(data), length); if (_heap_out) aether_heap_str_free(_tmp_old); _heap_out = 0; }
 if (out == 0) {
         {
-#line 75 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 83 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
             return (_tuple_string_string){"", "openssl unavailable"};
         }
     }
-#line 77 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 85 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
     return (_tuple_string_string){out, ""};
 }
 
-#line 236 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 244 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 static _tuple_string_int_string cryptography_md4_bytes(const char* data, int length) {
     int _heap_raw = 0; (void)_heap_raw;
     const char* raw = NULL;
     int _heap_owned = 0; (void)_heap_owned;
     const char* owned = NULL;
-#line 237 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 245 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 int ok = cryptography_md4_bytes_raw(aether_string_data(data), length);
 if (ok == 0) {
         {
-#line 239 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 247 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
             _tuple_string_int_string _builder_ret = (_tuple_string_int_string){aether_uniform_heap_str((const char*)(""), 0), 0, "md4 unavailable"};
             /* deferred */ if (_heap_raw) { aether_heap_str_free(raw); raw = NULL; _heap_raw = 0; }
             return _builder_ret;
         }
     }
-#line 241 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 249 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 { const char* _tmp_old = raw; raw = cryptography_get_binary_digest(); if (_heap_raw) aether_heap_str_free(_tmp_old); _heap_raw = 0; }
-#line 242 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 250 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 int n = cryptography_get_binary_digest_length();
-#line 243 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 251 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 { const char* _tmp_old = owned; owned = string_new_with_length(raw, n); if (_heap_owned) aether_heap_str_free(_tmp_old); _heap_owned = 1; }
-#line 244 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 252 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
 cryptography_release_binary_digest();
-#line 245 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
+#line 253 "/home/paul/scm/aether/build/../std/cryptography/module.ae"
     _tuple_string_int_string _builder_ret = (_tuple_string_int_string){aether_uniform_heap_str((const char*)(owned), _heap_owned), n, ""};
     /* deferred */ if (_heap_raw) { aether_heap_str_free(raw); raw = NULL; _heap_raw = 0; }
     return _builder_ret;
@@ -1571,70 +1619,70 @@ static int checksums_byte_at(const char* data, int data_len, int i) {
 }
 
 // Import: rcksum.fileio
-#line 79 "rcksum/fileio.ae"
+#line 85 "rcksum/fileio.ae"
 static void* fileio_buf_alloc(int n) {
-#line 80 "rcksum/fileio.ae"
+#line 86 "rcksum/fileio.ae"
     return zsync_buf_alloc(n);
 }
 
-#line 93 "rcksum/fileio.ae"
+#line 99 "rcksum/fileio.ae"
 static void fileio_buf_set(void* b, int i, int v) {
-#line 94 "rcksum/fileio.ae"
+#line 100 "rcksum/fileio.ae"
 zsync_buf_set(b, i, v);
 }
 
-#line 108 "rcksum/fileio.ae"
+#line 114 "rcksum/fileio.ae"
 static const char* fileio_buf_to_str(void* b, int n) {
     int _heap_s = 0; (void)_heap_s;
     const char* s = NULL;
-#line 109 "rcksum/fileio.ae"
+#line 115 "rcksum/fileio.ae"
 s = string_new_with_length(fileio_buf_as_string(b), n);
-#line 113 "rcksum/fileio.ae"
+#line 119 "rcksum/fileio.ae"
 string_retain(s);
-#line 114 "rcksum/fileio.ae"
+#line 120 "rcksum/fileio.ae"
     const char* _no_defer_ret = aether_uniform_heap_str((const char*)(s), _heap_s);
     return _no_defer_ret;
 }
 
-#line 135 "rcksum/fileio.ae"
+#line 141 "rcksum/fileio.ae"
 static const char* fileio_pad_block(const char* src, int src_len, int start, int rem, int blocksize) {
-#line 136 "rcksum/fileio.ae"
+#line 142 "rcksum/fileio.ae"
 void* out = zsync_buf_alloc(blocksize);
-#line 137 "rcksum/fileio.ae"
+#line 143 "rcksum/fileio.ae"
 int i = 0;
 while (i < rem) {
         {
-#line 139 "rcksum/fileio.ae"
+#line 145 "rcksum/fileio.ae"
 zsync_buf_set(out, i, (string_char_at_n(src, src_len, (start + i)) & 0xff));
-#line 140 "rcksum/fileio.ae"
+#line 146 "rcksum/fileio.ae"
 i = (i + 1);
         }
     }
-#line 142 "rcksum/fileio.ae"
+#line 148 "rcksum/fileio.ae"
     return aether_uniform_heap_str((const char*)(string_new_with_length(fileio_buf_as_string(out), blocksize)), 1);
 }
 
-#line 149 "rcksum/fileio.ae"
+#line 155 "rcksum/fileio.ae"
 static const char* fileio_slice(const char* src, int src_len, int start, int len) {
-#line 150 "rcksum/fileio.ae"
+#line 156 "rcksum/fileio.ae"
 void* out = zsync_buf_alloc(len);
-#line 151 "rcksum/fileio.ae"
+#line 157 "rcksum/fileio.ae"
 int i = 0;
 while (i < len) {
         {
-#line 153 "rcksum/fileio.ae"
+#line 159 "rcksum/fileio.ae"
 zsync_buf_set(out, i, (string_char_at_n(src, src_len, (start + i)) & 0xff));
-#line 154 "rcksum/fileio.ae"
+#line 160 "rcksum/fileio.ae"
 i = (i + 1);
         }
     }
-#line 156 "rcksum/fileio.ae"
+#line 162 "rcksum/fileio.ae"
     return aether_uniform_heap_str((const char*)(string_new_with_length(fileio_buf_as_string(out), len)), 1);
 }
 
-#line 161 "rcksum/fileio.ae"
+#line 167 "rcksum/fileio.ae"
 static const char* fileio_buf_as_string(void* b) {
-#line 162 "rcksum/fileio.ae"
+#line 168 "rcksum/fileio.ae"
     return zsync_buf_identity(b);
 }
 

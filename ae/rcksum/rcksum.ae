@@ -217,6 +217,24 @@ add_target_block_p(z: ptr, b: int, rsum_a: int, rsum_b: int, md4: string) {
     add_target_block(z as *RcksumState, b, rsum_a, rsum_b, md4)
 }
 
+// Stats accessors (for the client's -v output).
+stat_hash_hit_p(z: ptr) -> int {
+    s = z as *RcksumState
+    return s.stats.hash_hit
+}
+stat_weak_hit_p(z: ptr) -> int {
+    s = z as *RcksumState
+    return s.stats.weak_hit
+}
+stat_strong_hit_p(z: ptr) -> int {
+    s = z as *RcksumState
+    return s.stats.strong_hit
+}
+stat_checksummed_p(z: ptr) -> int {
+    s = z as *RcksumState
+    return s.stats.checksummed
+}
+
 // AddTargetBlock: store the stored hashes for block b.
 add_target_block(z: *RcksumState, b: int, rsum_a: int, rsum_b: int, md4: string) {
     if b < z.blocks {
