@@ -1,0 +1,71 @@
+// SPDX-FileCopyrightText: 2026 Colin Phipps <cph@moria.org.uk>
+// SPDX-License-Identifier: Artistic-2.0
+//
+// Minimal in-tree test harness for the Aether zsync port.
+//
+// Deliberately tiny and self-contained: this code ships under the
+// zsync Artistic-2.0 license alongside the port, so it does NOT depend
+// on aeocha (MIT) or any other external test framework. A test file
+// threads a *Harness through the asserts and calls report() at the end;
+// report() exits non-zero if anything failed, so `ae run` doubles as a
+// CI gate.
+
+import std.string
+
+extern malloc(size: int) -> ptr
+
+// The mutable counters can't live at module scope (Aether rejects
+// mutable module-level assignment), so the test threads this record
+// through every assert call — same shape aeocha settled on.
+struct Harness {
+    passed: int
+    failed: int
+}
+
+new() -> *Harness {
+    raw = malloc(16)
+    h = raw as *Harness
+    h.passed = 0
+    h.failed = 0
+    return h
+}
+
+ok(h: *Harness, cond: int, name: string) {
+    if cond != 0 {
+        h.passed = h.passed + 1
+        println("  ok   ${name}")
+    } else {
+        h.failed = h.failed + 1
+        println("  FAIL ${name}")
+    }
+}
+
+eq_int(h: *Harness, got: int, want: int, name: string) {
+    if got == want {
+        h.passed = h.passed + 1
+        println("  ok   ${name}")
+    } else {
+        h.failed = h.failed + 1
+        println("  FAIL ${name}: got ${got}, want ${want}")
+    }
+}
+
+eq_str(h: *Harness, got: string, want: string, name: string) {
+    if string.equals(got, want) == 1 {
+        h.passed = h.passed + 1
+        println("  ok   ${name}")
+    } else {
+        h.failed = h.failed + 1
+        println("  FAIL ${name}: got '${got}', want '${want}'")
+    }
+}
+
+// Final tally. Exits 1 if any assert failed so the run is a usable gate.
+report(h: *Harness) {
+    total = h.passed + h.failed
+    println("")
+    println("${h.passed}/${total} passed, ${h.failed} failed")
+    if h.failed != 0 {
+        exit(1)
+    }
+}

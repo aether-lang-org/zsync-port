@@ -1,0 +1,100 @@
+// SPDX-FileCopyrightText: 2004,2005,2007,2009,2025,2026 Colin Phipps <cph@moria.org.uk>
+// SPDX-License-Identifier: Artistic-2.0
+//
+// Parity test for ranges.ae — mirrors internal/rcksum/ranges_test.go
+// (the five addToRanges cases) plus contains / nextContainedAfter /
+// missingBlocksBetween. Uses only ptr + opaque accessors so it never
+// names ranges' struct types across the module boundary.
+
+import rcksum.ranges
+import test.assert
+
+// Build the canonical fixture: {0-9, 11-29, 40-49}.
+build() -> ptr {
+    z = ranges.new_ranges()
+    ranges.add_pair(z, 0, 9)
+    ranges.add_pair(z, 11, 29)
+    ranges.add_pair(z, 40, 49)
+    return z
+}
+
+// Assert the i-th range equals (s, e).
+check_one(h: ptr, z: ptr, i: int, s: int, e: int, name: string) {
+    assert.eq_int(h, ranges.range_start_at(z, i), s, "${name} start")
+    assert.eq_int(h, ranges.range_fin_at(z, i), e, "${name} fin")
+}
+
+main() {
+    println("=== ranges parity ===")
+    h = assert.new()
+
+    // already in: addToRanges(0) leaves {0-9,11-29,40-49}
+    z = build()
+    ranges.add_to_ranges(z, 0)
+    assert.eq_int(h, ranges.count(z), 3, "already-in: count")
+    check_one(h, z, 0, 0, 9, "already-in r0")
+    check_one(h, z, 1, 11, 29, "already-in r1")
+    check_one(h, z, 2, 40, 49, "already-in r2")
+
+    // fill hole: addToRanges(10) -> {0-29, 40-49}
+    z2 = build()
+    ranges.add_to_ranges(z2, 10)
+    assert.eq_int(h, ranges.count(z2), 2, "fill-hole: count")
+    check_one(h, z2, 0, 0, 29, "fill-hole r0")
+    check_one(h, z2, 1, 40, 49, "fill-hole r1")
+
+    // extend below: addToRanges(39) -> {0-9,11-29,39-49}
+    z3 = build()
+    ranges.add_to_ranges(z3, 39)
+    assert.eq_int(h, ranges.count(z3), 3, "extend-below: count")
+    check_one(h, z3, 2, 39, 49, "extend-below r2")
+
+    // extend above: addToRanges(30) -> {0-9,11-30,40-49}
+    z4 = build()
+    ranges.add_to_ranges(z4, 30)
+    assert.eq_int(h, ranges.count(z4), 3, "extend-above: count")
+    check_one(h, z4, 1, 11, 30, "extend-above r1")
+
+    // new range: addToRanges(35) -> {0-9,11-29,35-35,40-49}
+    z5 = build()
+    ranges.add_to_ranges(z5, 35)
+    assert.eq_int(h, ranges.count(z5), 4, "new-range: count")
+    check_one(h, z5, 2, 35, 35, "new-range r2")
+    check_one(h, z5, 3, 40, 49, "new-range r3")
+
+    // contains
+    zc = build()
+    assert.eq_int(h, ranges.contains(zc, 5), 1, "contains 5 (in 0-9)")
+    assert.eq_int(h, ranges.contains(zc, 10), 0, "contains 10 (hole)")
+    assert.eq_int(h, ranges.contains(zc, 49), 1, "contains 49 (top)")
+    assert.eq_int(h, ranges.contains(zc, 50), 0, "contains 50 (past)")
+
+    // nextContainedAfter
+    assert.eq_int(h, ranges.next_contained_after(zc, 5), 10, "next after 5 -> 10")
+    assert.eq_int(h, ranges.next_contained_after(zc, 10), 11, "next after 10 (hole) -> 11")
+    // 49 is inside {40-49}, so "next contained after" is end+1 = 50
+    // (verified against Go oracle: nextContainedAfter(49)==50).
+    assert.eq_int(h, ranges.next_contained_after(zc, 49), 50, "next after 49 -> 50 (end+1)")
+    assert.eq_int(h, ranges.next_contained_after(zc, 55), -1, "next after 55 (past all) -> -1")
+    assert.eq_int(h, ranges.next_contained_after(zc, 30), 40, "next after 30 (hole) -> 40")
+
+    // got_blocks counts distinct only
+    zg = ranges.new_ranges()
+    ranges.add_to_ranges(zg, 5)
+    ranges.add_to_ranges(zg, 6)
+    ranges.add_to_ranges(zg, 6)
+    assert.eq_int(h, ranges.got_blocks(zg), 2, "got_blocks distinct only")
+
+    // missingBlocksBetween(0,49) over {0-9,11-29,40-49} -> {10-10, 30-39}
+    zm = build()
+    miss = ranges.missing_blocks_between(zm, 0, 49)
+    assert.eq_int(h, ranges.list_len(miss), 2, "missing: 2 gaps")
+    g0 = ranges.list_pair(miss, 0)
+    g1 = ranges.list_pair(miss, 1)
+    assert.eq_int(h, ranges.pair_start(g0), 10, "gap0 start")
+    assert.eq_int(h, ranges.pair_fin(g0), 10, "gap0 fin")
+    assert.eq_int(h, ranges.pair_start(g1), 30, "gap1 start")
+    assert.eq_int(h, ranges.pair_fin(g1), 39, "gap1 fin")
+
+    assert.report(h)
+}

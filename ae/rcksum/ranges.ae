@@ -1,0 +1,249 @@
+// SPDX-FileCopyrightText: 2004,2005,2007,2009,2025,2026 Colin Phipps <cph@moria.org.uk>
+// SPDX-License-Identifier: Artistic-2.0
+//
+// Port of internal/rcksum/ranges.go — the set of contiguous block-ID
+// ranges already obtained. Pure logic, no external dependencies beyond
+// std.list, which backs the dynamic `[]blockIDPair`.
+
+import std.list (*)
+
+extern malloc(size: int) -> ptr
+
+// A half-open-free inclusive range of block IDs [start, end].
+// Block IDs are int32 in the Go code; plain int here (Aether int is
+// 64-bit, a safe widening).
+struct BlockPair {
+    start: int
+    fin: int   // `end` is fine, but `fin` avoids any keyword ambiguity
+}
+
+// The ordered, non-overlapping set of known ranges plus a running count
+// of distinct blocks held. Mirrors Go's blockRanges struct.
+struct BlockRanges {
+    ranges: ptr      // std.list of *BlockPair, sorted ascending, disjoint
+    got_blocks: int
+}
+
+new_pair(start: int, fin: int) -> *BlockPair {
+    raw = malloc(16)
+    p = raw as *BlockPair
+    p.start = start
+    p.fin = fin
+    return p
+}
+
+// Opaque accessors so callers in other modules can read a *BlockPair
+// without naming the struct type across the module boundary (Aether's
+// cross-module struct visibility is still rough — avoid relying on it).
+pair_start(p: *BlockPair) -> int {
+    return p.start
+}
+
+pair_fin(p: *BlockPair) -> int {
+    return p.fin
+}
+
+new_ranges() -> *BlockRanges {
+    raw = malloc(16)
+    z = raw as *BlockRanges
+    z.ranges = list_new()
+    z.got_blocks = 0
+    return z
+}
+
+count(z: *BlockRanges) -> int {
+    return list_size(z.ranges)
+}
+
+// Distinct blocks held so far.
+got_blocks(z: *BlockRanges) -> int {
+    return z.got_blocks
+}
+
+// Seed a range directly (used by tests / setup before any add).
+add_pair(z: *BlockRanges, start: int, fin: int) {
+    list_add_raw(z.ranges, new_pair(start, fin))
+}
+
+// The i-th range's bounds, via opaque accessors.
+range_start_at(z: *BlockRanges, i: int) -> int {
+    return pair_start(pair_at(z, i))
+}
+
+range_fin_at(z: *BlockRanges, i: int) -> int {
+    return pair_fin(pair_at(z, i))
+}
+
+pair_at(z: *BlockRanges, i: int) -> *BlockPair {
+    return list_get_raw(z.ranges, i) as *BlockPair
+}
+
+// Insert a *BlockPair at index `at`, shifting later elements up by one.
+// std.list has remove-at but no insert-at, so emulate: append the last
+// element to grow the array, then shift right from the tail down to `at`.
+insert_pair(z: *BlockRanges, at: int, p: *BlockPair) {
+    n = list_size(z.ranges)
+    if at >= n {
+        list_add_raw(z.ranges, p)
+        return
+    }
+    // Grow by one by re-adding the current last element.
+    last = list_get_raw(z.ranges, n - 1)
+    list_add_raw(z.ranges, last)
+    // Shift elements [at, n-1) up into [at+1, n).
+    i = n - 1
+    while i > at {
+        prev = list_get_raw(z.ranges, i - 1)
+        list_set(z.ranges, i, prev)
+        i = i - 1
+    }
+    list_set(z.ranges, at, p)
+}
+
+// rangeBeforeBlock: which existing range a block falls relative to.
+//   -1  inside an existing range
+//    0  before the first range
+//    i  between range i-1 and range i
+//    n  after the last range
+range_before_block(z: *BlockRanges, x: int) -> int {
+    lo = 0
+    hi = list_size(z.ranges) - 1
+    while lo <= hi {
+        r = (hi + lo) / 2
+        p = pair_at(z, r)
+        if x > p.fin {
+            lo = r + 1
+        } else if x < p.start {
+            hi = r - 1
+        } else {
+            return -1
+        }
+    }
+    return lo
+}
+
+// addToRanges: mark block x as known, merging/extending as needed.
+add_to_ranges(z: *BlockRanges, x: int) {
+    r = range_before_block(z, x)
+    if r == -1 {
+        return   // already have it
+    }
+    z.got_blocks = z.got_blocks + 1
+    n = list_size(z.ranges)
+
+    // Fills the hole exactly between range r-1 and range r: merge them.
+    if r > 0 {
+        if r < n {
+            below = pair_at(z, r - 1)
+            above = pair_at(z, r)
+            if below.fin == x - 1 {
+                if above.start == x + 1 {
+                    below.fin = above.fin
+                    list_remove(z.ranges, r)
+                    return
+                }
+            }
+        }
+    }
+
+    // Adjoins the range below — extend its top.
+    if r > 0 {
+        if n > 0 {
+            below = pair_at(z, r - 1)
+            if below.fin == x - 1 {
+                below.fin = x
+                return
+            }
+        }
+    }
+
+    // Adjoins the range above — extend its bottom.
+    if r < n {
+        above = pair_at(z, r)
+        if above.start == x + 1 {
+            above.start = x
+            return
+        }
+    }
+
+    // Otherwise a brand-new singleton range.
+    insert_pair(z, r, new_pair(x, x))
+}
+
+// contains: do we already hold block x?
+contains(z: *BlockRanges, x: int) -> int {
+    if range_before_block(z, x) == -1 {
+        return 1
+    }
+    return 0
+}
+
+// nextContainedAfter: ID of the next known block >= ... after x.
+// Returns -1 if no known block follows.
+next_contained_after(z: *BlockRanges, x: int) -> int {
+    r = range_before_block(z, x)
+    n = list_size(z.ranges)
+    if r == -1 {
+        // x is inside a range; return the block just past that range's end.
+        i = 0
+        while i < n {
+            p = pair_at(z, i)
+            if x >= p.start {
+                if x <= p.fin {
+                    return p.fin + 1
+                }
+            }
+            i = i + 1
+        }
+    }
+    if r >= n {
+        return -1
+    }
+    return pair_at(z, r).start
+}
+
+// Size of a *BlockPair list returned by missing_blocks_between.
+list_len(l: ptr) -> int {
+    return list_size(l)
+}
+
+// i-th *BlockPair of such a list.
+list_pair(l: ptr, i: int) -> *BlockPair {
+    return list_get_raw(l, i) as *BlockPair
+}
+
+// missingBlocksBetween: ranges of blocks in [from, to] not yet held.
+// Returns a std.list of *BlockPair (caller owns it). Mirrors the Go
+// gap-walk exactly.
+missing_blocks_between(z: *BlockRanges, from: int, to: int) -> ptr {
+    result = list_new()
+    if from > to {
+        return result
+    }
+    if from < 0 {
+        from = 0
+    }
+    current = from
+    n = list_size(z.ranges)
+    i = 0
+    while i < n {
+        p = pair_at(z, i)
+        range_start = p.start
+        range_end = p.fin
+        if current < range_start {
+            gap_end = range_start
+            if gap_end > to {
+                gap_end = to + 1
+            }
+            list_add_raw(result, new_pair(current, gap_end - 1))
+            current = range_end + 1
+        } else if current <= range_end {
+            current = range_end + 1
+        }
+        i = i + 1
+    }
+    if current <= to {
+        list_add_raw(result, new_pair(current, to))
+    }
+    return result
+}
