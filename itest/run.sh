@@ -15,7 +15,7 @@
 
 set -u
 AE=${AE:-/home/paul/scm/aether/build/ae}
-HERE="$(cd "$(dirname "$0")/.." && pwd)"     # the ae/ dir
+HERE="$(cd "$(dirname "$0")/.." && pwd)"     # the repo root
 BIN="$HERE/build"
 PORT=${PORT:-8079}
 WORK="$(mktemp -d)"

@@ -17,26 +17,55 @@ other users.
 
 The zsync web site is at http://zsync.moria.org.uk/ .
 
+## Implementation
+
+This zsync is written in [Aether](https://github.com/aether-lang-org/aether)
+— a systems language that compiles to C. The rsync rolling-checksum engine,
+the `.zsync` control-file format, the HTTP-range downloader and a native
+test file server are all pure Aether (with a small Artistic-licensed C shim,
+`rcksum/fileio.c`, for positional file I/O byte buffers). It uses Aether's
+`std.http` client + server and `std.cryptography` (MD4/SHA-1). It does not
+depend on Aether's MIT-licensed test/build tooling (aeocha/aeb) — the whole
+thing stays under the Artistic License 2.0.
+
 ## Installation
 
 zsync is free software. There is no implied support, no implied fitness for
 purpose, no warranty. You use it at your own risk. See the included LICENSE for
 details.
 
-To build zsync:
+To build zsync you need the Aether toolchain (`ae` / `aetherc`) on your PATH,
+then:
 
 ```shell
-go build -o zsync ./cmd/zsync
-go build -o zsyncmake ./cmd/zsyncmake
+make bins        # builds ./build/zsync, ./build/zsyncmake, ./build/fileserver
+make test        # runs the unit suite (ranges, rcksum, control, download, ...)
+make itest       # full client+server round-trip over HTTP (Range/206)
 ```
 
 You can use `zsync` and `zsyncmake` without installing them. If you want to
 install them then, as root, run:
 
 ```shell
-install zsync zsyncmake /usr/local/bin
+install build/zsync build/zsyncmake /usr/local/bin
 install -D man/zsync.1 man/zsyncmake.1 /usr/local/man/man1/
 ```
+
+### Source layout
+
+- `rcksum/` — the rolling-checksum engine (ranges, checksums, the matcher)
+  and the positional-I/O shim.
+- `zsync/` — the `.zsync` control-file parser and the download State.
+- `cmd/` — the `zsync` client, `zsyncmake` generator, and a native `fileserver`.
+- `test/` — a tiny in-tree assert harness; `itest/` — the integration test.
+
+### Known gaps vs. the historical C/Go zsync
+
+The core protocol is complete and verified byte-for-byte. A few CLI niceties
+are accepted but not yet fully wired: `--no-check-certificate` is a no-op
+(the HTTP client has no TLS-verify-skip toggle yet), `-A` applies a single
+credential to all hosts rather than a per-host map, and `If-Modified-Since`
+relies on the server returning `304` (the bundled test `fileserver` does not).
 
 ## Use
 
