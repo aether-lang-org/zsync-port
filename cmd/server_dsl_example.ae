@@ -1,0 +1,43 @@
+// SPDX-FileCopyrightText: 2026 Colin Phipps <cph@moria.org.uk>
+// SPDX-License-Identifier: Artistic-2.0
+//
+// "config IS code" — the entire zsync server side composed as a
+// closure-DSL block (see aether/docs/closures-and-builder-dsl.md).
+// This .ae file IS the config: no YAML, no separate parser. The block
+// body is full Aether, so mounts can be chosen by env vars, conditionals,
+// loops — whatever the operator needs.
+//
+//   build:  aetherc cmd/server_dsl_example.ae out.c && cc out.c rcksum/fileio.o $(ae cflags)
+//   run:    ./server_dsl_example <port> <dir>
+//
+// Every server-side feature (bind address, served directories with
+// Range/206, health probe) is declared in the trailing block; each
+// serve()/health() call auto-receives the server via _ctx injection.
+
+import std.string (*)
+import std.os (*)
+import cmd.serverdsl
+
+parse_num(s: string) -> int {
+    ok = string_try_long(s)
+    if ok == 0 { return 0 }
+    return string_get_long(s)
+}
+
+main() {
+    argc = aether_args_count()
+    port = 8080
+    dir = "."
+    if argc > 1 { port = parse_num(aether_args_get(1)) }
+    if argc > 2 { dir = aether_args_get(2) }
+
+    // The whole server, declaratively. The block runs with the server
+    // as its builder context; serve()/health() register routes on it.
+    srv = serverdsl.zsync_server("127.0.0.1", port) {
+        serve("/files", dir)        // zsync downloads — full Range/206 support
+        health("/healthz")          // 200 "ok" liveness probe
+    }
+
+    println("zsync server (closure-DSL) on 127.0.0.1:${port}, serving ${dir} at /files")
+    serverdsl.run(srv)              // start the accept loop (blocks)
+}

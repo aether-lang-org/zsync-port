@@ -131,7 +131,64 @@ the *full* request path under `base` — it does **not** strip the route
 prefix. So a request for `/files/iop.dat` looks for `base/files/iop.dat`,
 not `base/iop.dat`. Either mirror the directory layout (put files under
 `base/files/`) or have the handler strip the prefix before calling
-`serve_static`. (Mount at `/*` and there's nothing to strip.)
+`serve_static`. (Mount at `/*` and there's nothing to strip.) The
+closure-DSL below handles this for you.
+
+### The whole server as a closure-DSL — "config IS code"
+
+Every server-side feature composes in a single trailing block, the way
+[`aether/docs/closures-and-builder-dsl.md`](https://github.com/aether-lang-org/aether/blob/main/docs/closures-and-builder-dsl.md)
+intends: the `.ae` file **is** the config — no YAML, no separate parser —
+and the block body is still full Aether (env lookups, conditionals, loops).
+`cmd/serverdsl.ae` provides the surface; `cmd/server_dsl_example.ae` is a
+runnable entry point. This is the verified, working shape:
+
+```aether
+import cmd.serverdsl
+
+main() {
+    srv = serverdsl.zsync_server("127.0.0.1", 8080) {
+        serve("/files", "/var/www/downloads")   // zsync downloads (full Range/206)
+        serve("/pub",   "/srv/public")           // a second mount
+        health("/healthz")                       // 200 "ok" liveness probe
+    }
+    serverdsl.run(srv)                           // start the accept loop
+}
+```
+
+`zsync_server(host, port)` creates the listener and pushes it on the
+builder context stack; each `serve(...)` / `health(...)` call inside the
+block auto-receives it via the `_ctx: ptr` convention (no parent-child
+wiring), registers its route, and `run(srv)` starts accepting. `serve`
+strips the route prefix and answers `Range` requests with `206` +
+`Content-Range` (with a `..` traversal guard), so a real `zsync` client
+downloads straight through it.
+
+Because the block is ordinary Aether, the "config" can be dynamic
+(`os_getenv` comes from `import std.os (*)`):
+
+```aether
+dir = os_getenv("ZSYNC_DIR")
+if string_equals(dir, "") == 1 { dir = "/srv/zsync" }
+
+srv = serverdsl.zsync_server("0.0.0.0", port) {
+    serve("/files", dir)
+    if string_equals(os_getenv("ENABLE_HEALTH"), "") == 0 {
+        health("/healthz")
+    }
+}
+```
+
+Verified end-to-end: build with `make bins` (produces
+`build/server_dsl_example`), and a `zsync` client downloads a file through
+the DSL-composed server, byte-identical, with the health endpoint live on
+the same port.
+
+> Note: today `serve`/`health` are *immediate* `_ctx`-injected DSL calls.
+> They could also be expressed as Aether `builder` functions (the
+> `builder name(...) with <factory>` flavour) if you wanted per-route
+> sub-blocks (e.g. `serve("/files") { dir("…"); max_age(3600) }`) — a
+> natural next step for whoever extends this.
 
 Porting it surfaced three gaps in Aether's stdlib, all filed and now landed
 in Aether ≥ 0.218 — see

@@ -64,7 +64,7 @@ test-mk: build/zsyncmake_test
 test: test-pure test-fileio test-rcksum test-control test-state test-mk
 
 # The three shipping binaries.
-bins: build/zsync build/zsyncmake build/fileserver
+bins: build/zsync build/zsyncmake build/fileserver build/server_dsl_example
 
 # Full end-to-end integration test (client + native server over HTTP).
 itest: bins

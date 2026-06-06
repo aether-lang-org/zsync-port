@@ -1,0 +1,191 @@
+// SPDX-FileCopyrightText: 2026 Colin Phipps <cph@moria.org.uk>
+// SPDX-License-Identifier: Artistic-2.0
+//
+// A "config IS code" closure-DSL surface for the zsync server side, in
+// the spirit of aether/docs/closures-and-builder-dsl.md. The whole
+// server — bind address, served directories, and any extra endpoints —
+// is composed declaratively in a trailing block whose body is still
+// full Aether (env lookups, conditionals, the lot).
+//
+//     zsync_server("0.0.0.0", 8080) {
+//         serve("/files", "/var/www/downloads")   // zsync downloads (Range/206)
+//         serve("/pub",   "/srv/public")          // a second mount
+//         health("/healthz")                      // 200 "ok" liveness probe
+//     }
+//
+// `zsync_server(...)` creates the http.server, pushes it on the builder
+// context stack, runs the block (each serve/health call registers a
+// route against the pushed server via _ctx auto-injection), then starts
+// the listener. No parent-child wiring, no config-file parser — the .ae
+// file IS the config.
+
+import std.string (*)
+import std.http (*)
+import std.fs
+import rcksum.fileio
+
+extern malloc(size: int) -> ptr
+
+// A served directory mount: maps the route prefix to a base dir and
+// strips the prefix before serve_static (which maps the FULL path under
+// base — see the README "sub-path mounts" note).
+struct Mount {
+    prefix: string
+    base: string
+}
+
+mount_as_ptr(m: *Mount) -> ptr {
+    return m
+}
+
+// The serve handler reads its Mount from user_data, strips the route
+// prefix off the request path, and hands the rest to serve_static with
+// Range/206 support (Aether >= 0.218, #641).
+@c_callback
+mount_handler(req: ptr, res: ptr, ud: ptr) {
+    m = ud as *Mount
+    path = http_request_path(req)
+    // strip the prefix; serve from base + remainder
+    rest = strip_prefix(path, m.prefix)
+    full = string_concat(m.base, rest)
+    serve_one(req, res, full)
+}
+
+@c_callback
+health_handler(req: ptr, res: ptr, ud: ptr) {
+    http_response_set_status(res, 200)
+    http_response_set_body(res, "ok")
+}
+
+// zsync_server(host, port) { ... } — the DSL entry point. Returns the
+// server pointer so the trailing block's serve()/health() calls (which
+// take _ctx: ptr) auto-receive it via the builder context stack.
+zsync_server(host: string, port: int) -> ptr {
+    server = http_server_create(port)
+    http_server_set_host(server, host)
+    return server
+}
+
+// serve(prefix, dir) — mount a directory under a route prefix. Uses
+// _ctx auto-injection: inside a zsync_server { } block, the server is
+// supplied automatically; callers just write serve("/files", "/dir").
+serve(_ctx: ptr, prefix: string, dir: string) {
+    if _ctx == null {
+        return
+    }
+    raw = malloc(16)
+    m = raw as *Mount
+    m.prefix = prefix
+    m.base = dir
+    // register prefix/* so every file under it routes here
+    route = string_concat(prefix, "/*")
+    http_server_get(_ctx, route, mount_handler, mount_as_ptr(m))
+}
+
+// health(path) — register a liveness endpoint returning 200 "ok".
+health(_ctx: ptr, path: string) {
+    if _ctx == null {
+        return
+    }
+    http_server_get(_ctx, path, health_handler, null)
+}
+
+// run(server) — start the listener (blocks). Separate from zsync_server
+// so the block runs (registering routes) before the accept loop begins.
+run(server: ptr) {
+    http_server_start_raw(server)
+}
+
+// --- helpers ---
+
+// serve_one: emit `full` honouring the request's Range header. We
+// implement Range here rather than calling serve_static because the
+// route prefix has already been stripped (serve_static maps the FULL
+// request path under base; serve_file ignores Range). This is the same
+// Range logic the standalone fileserver used before #641.
+serve_one(req: ptr, res: ptr, full: string) {
+    // path-traversal guard: reject any ".." in the resolved path.
+    if string_contains(full, "..") == 1 {
+        http_response_set_status(res, 403)
+        http_response_set_body(res, "forbidden")
+        return
+    }
+    if fs.exists(full) == 0 {
+        http_response_set_status(res, 404)
+        http_response_set_body(res, "not found")
+        return
+    }
+    size, szerr = fs.size(full)
+    fd = fileio.open_ro(full)
+    if fd < 0 {
+        http_response_set_status(res, 500)
+        http_response_set_body(res, "open failed")
+        return
+    }
+    rangeval = http_get_header(req, "Range")
+    if is_blank(rangeval) == 1 {
+        body, n = fileio.read_at(fd, size, 0)
+        http_response_set_status(res, 200)
+        http_response_set_header(res, "Accept-Ranges", "bytes")
+        http_response_set_body_n(res, body, n)
+        fileio.close_fd(fd)
+        return
+    }
+    start, fin, ok = parse_range(rangeval, size)
+    if ok == 0 {
+        http_response_set_status(res, 416)
+        http_response_set_body(res, "bad range")
+        fileio.close_fd(fd)
+        return
+    }
+    body, n = fileio.read_at(fd, fin - start + 1, start)
+    http_response_set_status(res, 206)
+    http_response_set_header(res, "Accept-Ranges", "bytes")
+    http_response_set_header(res, "Content-Range", content_range(start, fin, size))
+    http_response_set_body_n(res, body, n)
+    fileio.close_fd(fd)
+}
+
+is_blank(s: string) -> int {
+    if s == null { return 1 }
+    if string_equals(s, "") == 1 { return 1 }
+    return 0
+}
+
+parse_range(h: string, size: int) -> (int, int, int) {
+    if string_starts_with(h, "bytes=") == 0 { return 0, 0, 0 }
+    body = string_substring(h, 6, string_length(h))
+    dash = string_index_of(body, "-")
+    if dash < 0 { return 0, 0, 0 }
+    start = parse_num(string_substring(body, 0, dash))
+    fin_s = string_substring(body, dash + 1, string_length(body))
+    fin = size - 1
+    if string_equals(fin_s, "") == 0 { fin = parse_num(fin_s) }
+    if fin >= size { fin = size - 1 }
+    if start < 0 { return 0, 0, 0 }
+    if start > fin { return 0, 0, 0 }
+    return start, fin, 1
+}
+
+content_range(start: int, fin: int, size: int) -> string {
+    out = string_concat("bytes ", string_from_int(start))
+    out = string_concat(out, "-")
+    out = string_concat(out, string_from_int(fin))
+    out = string_concat(out, "/")
+    out = string_concat(out, string_from_int(size))
+    return out
+}
+
+parse_num(s: string) -> int {
+    ok = string_try_long(s)
+    if ok == 0 { return 0 }
+    return string_get_long(s)
+}
+
+// strip a leading prefix from a path; if it doesn't match, return path.
+strip_prefix(path: string, prefix: string) -> string {
+    if string_starts_with(path, prefix) == 1 {
+        return string_substring(path, string_length(prefix), string_length(path))
+    }
+    return path
+}
