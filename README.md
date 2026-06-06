@@ -103,6 +103,36 @@ Bottom line: the two implementations are **wire-compatible** — same `.zsync`
 format, same HTTP `Range`/`206` protocol. You can mix and match clients,
 generators, and servers freely.
 
+### Serving zsync downloads alongside other endpoints (shared listener)
+
+The bundled `fileserver` owns its own listener for convenience, but the
+file-serving is just an ordinary `std.http` handler — **it does not need a
+dedicated listener.** You can register it as one route among many on a
+single `http.server_create(port)`. The dispatcher walks routes in
+registration order and takes the first match (`http_route_matches`: exact
+match first, then `*` wildcard), so register specific routes before a
+catch-all. Verified working — an API route and zsync file-serving on one
+port:
+
+```aether
+server = http.server_create(port)
+http.server_set_host(server, "127.0.0.1")
+http.http_server_get(server, "/api/status", api_handler, null)     // specific first
+http.http_server_get(server, "/files/*",   files_handler, ctx)     // catch-all serve_static
+http.server_start(server)
+```
+
+`/api/status` returns JSON; `/files/iop.dat` serves the file with full
+`Range`/`206` support; a real `zsync` client downloads through the `/files/`
+route while the API route stays live on the same port.
+
+**One gotcha for sub-path mounts:** `http.serve_static(req, res, base)` maps
+the *full* request path under `base` — it does **not** strip the route
+prefix. So a request for `/files/iop.dat` looks for `base/files/iop.dat`,
+not `base/iop.dat`. Either mirror the directory layout (put files under
+`base/files/`) or have the handler strip the prefix before calling
+`serve_static`. (Mount at `/*` and there's nothing to strip.)
+
 Porting it surfaced three gaps in Aether's stdlib, all filed and now landed
 in Aether ≥ 0.218 — see
 [aether-lang-org/aether](https://github.com/aether-lang-org/aether):
