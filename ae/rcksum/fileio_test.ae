@@ -1,0 +1,56 @@
+// SPDX-FileCopyrightText: 2026 Colin Phipps <cph@moria.org.uk>
+// SPDX-License-Identifier: Artistic-2.0
+//
+// Verifies the positional-I/O shim: out-of-order pwrite, pread back,
+// truncate. This is the primitive the rcksum core relies on to scatter
+// reconstructed blocks into the output file.
+
+import std.string (*)
+import rcksum.fileio
+import test.assert
+
+main() {
+    println("=== fileio (positional pwrite/pread) ===")
+    h = assert.new()
+
+    path = "/tmp/zsync_fileio_check.bin"
+    fd = fileio.open_rw(path)
+    assert.ok(h, fd >= 0, "open_rw returns valid fd")
+
+    // Write out of order: "world" at offset 5, then "hello" at offset 0.
+    n1 = fileio.write_at(fd, "world", 5, 5)
+    n2 = fileio.write_at(fd, "hello", 5, 0)
+    assert.eq_int(h, n1, 5, "pwrite world -> 5")
+    assert.eq_int(h, n2, 5, "pwrite hello -> 5")
+
+    // Read the whole 10 bytes back.
+    s, rn = fileio.read_at(fd, 10, 0)
+    assert.eq_int(h, rn, 10, "pread 10 bytes")
+    assert.eq_str(h, s, "helloworld", "reassembled out-of-order writes")
+
+    // Read a middle slice.
+    mid, mn = fileio.read_at(fd, 5, 2)
+    assert.eq_int(h, mn, 5, "pread mid 5")
+    assert.eq_str(h, mid, "llowo", "mid slice")
+
+    // Truncate to 5, read back.
+    fileio.truncate_to(fd, 5)
+    t, tn = fileio.read_at(fd, 100, 0)
+    assert.eq_int(h, tn, 5, "after truncate, only 5 bytes")
+    assert.eq_str(h, t, "hello", "truncated content")
+
+    // Binary safety: write bytes including NUL. Build the 3-byte buffer
+    // via separate length-explicit writes (string_concat is strlen-based
+    // and would truncate at the embedded NUL — the LLM.md trap).
+    fileio.write_at(fd, "a", 1, 0)
+    fileio.write_at(fd, string_from_char(0), 1, 1)
+    fileio.write_at(fd, "b", 1, 2)
+    b, bn = fileio.read_at(fd, 3, 0)
+    assert.eq_int(h, bn, 3, "binary read 3")
+    assert.eq_int(h, string_char_at_n(b, 3, 0) & 0xff, 97, "byte0 'a'")
+    assert.eq_int(h, string_char_at_n(b, 3, 1) & 0xff, 0, "byte1 NUL preserved")
+    assert.eq_int(h, string_char_at_n(b, 3, 2) & 0xff, 98, "byte2 'b'")
+
+    fileio.close_fd(fd)
+    assert.report(h)
+}

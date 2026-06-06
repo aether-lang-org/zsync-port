@@ -1,0 +1,66 @@
+// SPDX-FileCopyrightText: 2026 Colin Phipps <cph@moria.org.uk>
+// SPDX-License-Identifier: Artistic-2.0
+//
+// Aether surface over the positional-I/O C shim (fileio.c). zsync needs
+// to scatter reconstructed blocks into the output file at arbitrary
+// offsets (pwrite) and read them back (pread) — std.fs has no offset
+// I/O yet, so these bind the uniquely-named zsync_io_* wrappers.
+
+import std.string (*)
+
+extern malloc(size: int) -> ptr
+extern zsync_io_open_rw_trunc(path: string) -> int
+extern zsync_io_open_ro(path: string) -> int
+extern zsync_io_pwrite(fd: int, buf: string, count: long, offset: long) -> long
+extern zsync_io_pread_alloc(fd: int, count: long, offset: long) -> string
+extern zsync_io_last_read_len() -> long
+extern zsync_io_ftruncate(fd: int, length: long) -> int
+extern zsync_io_close(fd: int) -> int
+extern zsync_io_fsync(fd: int) -> int
+
+// Open the output file for read+write, creating/truncating. Returns
+// the fd (>=0) or -1.
+open_rw(path: string) -> int {
+    return zsync_io_open_rw_trunc(path)
+}
+
+open_ro(path: string) -> int {
+    return zsync_io_open_ro(path)
+}
+
+// Write `len` bytes of `data` at byte `offset`. Returns bytes written
+// or -1. `data` may contain embedded NULs (binary blocks) — the count
+// is explicit, so it is binary-safe. int args widen implicitly to the
+// shim's long params; the long result narrows back to int (block writes
+// are always < 2^31).
+write_at(fd: int, data: string, len: int, offset: int) -> int {
+    written = zsync_io_pwrite(fd, data, len, offset)
+    return written
+}
+
+// Read `len` bytes at `offset` into a fresh heap buffer. Returns the
+// buffer as a length-aware string and the number of bytes actually
+// read (may be < len at EOF), or ("", -1) on error.
+read_at(fd: int, len: int, offset: int) -> (string, int) {
+    buf = zsync_io_pread_alloc(fd, len, offset)
+    n = zsync_io_last_read_len()
+    if n < 0 {
+        return "", -1
+    }
+    // Wrap the malloc'd C buffer as a length-aware Aether string so
+    // embedded NULs survive (block data is binary).
+    s = string_new_with_length(buf, n)
+    return s, n
+}
+
+truncate_to(fd: int, length: int) -> int {
+    return zsync_io_ftruncate(fd, length)
+}
+
+close_fd(fd: int) -> int {
+    return zsync_io_close(fd)
+}
+
+sync_fd(fd: int) -> int {
+    return zsync_io_fsync(fd)
+}
