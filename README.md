@@ -28,6 +28,25 @@ test file server are all pure Aether (with a small Artistic-licensed C shim,
 depend on Aether's MIT-licensed test/build tooling (aeocha/aeb) — the whole
 thing stays under the Artistic License 2.0.
 
+### How this port was made
+
+The Go → Aether port was done by **Claude (Anthropic), Opus 4.8**, in a
+single session of **roughly four hours**, with only a few points of human
+arbitration from **Paul Hammant** (chiefly: deciding to file the MD4 gap
+upstream rather than inline it, choosing full CLI flag-parity before
+deleting the Go, and the branch/credit layout you're reading now). The work
+was methodical and parity-gated — built leaf-first, every module verified
+byte-exact against the original Go before the next was written, and three
+gaps it surfaced in Aether's standard library (#637, #640, #641) were filed
+and landed upstream along the way. The pristine original lives on the
+`legacy_golang` branch; this `main` branch is the Aether port.
+
+This is a derived work: the rsync algorithm, the `.zsync` format, the
+optimisations, and the original C/Go implementation are the work of the
+authors credited below, under their chosen licence (Artistic 2.0), which
+this port preserves unchanged. The port adds nothing to the copyright or
+licensing — it stands on their work.
+
 ## Installation
 
 zsync is free software. There is no implied support, no implied fitness for
