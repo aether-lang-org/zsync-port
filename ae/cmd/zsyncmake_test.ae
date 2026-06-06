@@ -1,0 +1,68 @@
+// SPDX-FileCopyrightText: 2004,2005,2007,2009,2025,2026 Colin Phipps <cph@moria.org.uk>
+// SPDX-License-Identifier: Artistic-2.0
+//
+// Byte-exact parity test for zsyncmake against the Go tool. The Go
+// reference (/tmp/go_ref.zsync) was produced with:
+//   zsyncmake -b 1024 -o go_ref.zsync -u http://example/ctltest.dat \
+//             -f ctltest.dat ctltest.dat
+// We regenerate the same control file in Aether (passing the Go-recorded
+// MTime so the headers match) and assert the bytes are identical.
+
+import std.string (*)
+import std.fs
+import cmd.mklib
+import test.assert
+
+main() {
+    println("=== zsyncmake byte-parity vs Go ===")
+    h = assert.new()
+
+    data, dlen, e = fs.read_binary("/tmp/ctltest.dat")
+    assert.eq_str(h, e, "", "read input")
+
+    mtime, me, mk = read_line("/tmp/go_mtime.txt")
+    ref, rlen, re = fs.read_binary("/tmp/go_ref.zsync")
+    assert.eq_str(h, re, "", "read go reference")
+
+    out, olen = mklib.generate_n(data, dlen, 1024, "ctltest.dat", mtime, "http://example/ctltest.dat")
+
+    assert.eq_int(h, olen, rlen, "output length matches Go (${olen} vs ${rlen})")
+
+    // byte-by-byte compare (length-aware; the table contains NUL bytes
+    // that strlen-based string_length would truncate at)
+    same = 1
+    firstdiff = 0 - 1
+    i = 0
+    n = olen
+    if rlen < n { n = rlen }
+    while i < n {
+        if (string_char_at_n(out, olen, i) & 0xff) != (string_char_at_n(ref, rlen, i) & 0xff) {
+            same = 0
+            if firstdiff < 0 { firstdiff = i }
+        }
+        i = i + 1
+    }
+    if same == 0 {
+        println("  first byte diff at offset ${firstdiff}")
+    }
+    assert.eq_int(h, same, 1, "byte-identical to Go zsyncmake output")
+
+    assert.report(h)
+}
+
+// Read the first line of a file (without trailing newline).
+read_line(path: string) -> (string, string, int) {
+    data, n, e = fs.read_binary(path)
+    if e != "" {
+        return "", e, 0
+    }
+    // trim at first \n
+    i = 0
+    while i < n {
+        if (string_char_at_n(data, n, i) & 0xff) == 10 {
+            return string_substring(data, 0, i), "", 1
+        }
+        i = i + 1
+    }
+    return data, "", 1
+}

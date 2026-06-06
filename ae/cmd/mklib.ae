@@ -1,0 +1,227 @@
+// SPDX-FileCopyrightText: 2004,2005,2007,2009,2025,2026 Colin Phipps <cph@moria.org.uk>
+// SPDX-License-Identifier: Artistic-2.0
+//
+// Port of cmd/zsyncmake/main.go — generate a .zsync control file from an
+// input file. Reads the file, computes per-block (rsum, MD4) plus a
+// whole-file SHA-1, derives the hash lengths, and writes headers + the
+// binary checksum table. Output is byte-compatible with the Go tool.
+
+import std.string (*)
+import std.math (*)
+import std.cryptography
+import std.os (*)
+import std.fs
+import rcksum.checksums
+import rcksum.fileio
+
+// float<->int helpers (Aether has no `as int` on scalars; a return-type
+// coercion truncates float->int, and *1.0 widens int->float).
+f2i(x: float) -> int {
+    return x
+}
+i2f(x: int) -> float {
+    return x * 1.0
+}
+
+VERSION() -> string {
+    return "0.7.1"
+}
+
+// determineHashLengths — exact port of the Go float formula.
+// Returns (seq_matches, rsum_len, checksum_len).
+determine_hash_lengths(file_len: int, blocksize: int) -> (int, int, int) {
+    length = i2f(file_len)
+    bs = i2f(blocksize)
+    seq_matches = 1
+    // rsumLen = ceil( (log2(len) + log2(bs) - 8.6) / 8 )
+    rsum_len = f2i(math_ceil((log2f(length) + log2f(bs) - 8.6) / 8.0))
+
+    if rsum_len > 4 {
+        seq_matches = 2
+        rsum_len = 4
+    }
+    if rsum_len < 2 {
+        rsum_len = 2
+    }
+
+    // checksumLen = max( ceil((20+log2(len)+log2(1+len/bs))/seq/8),
+    //                    ceil((20+log2(1+len/bs))/8) )
+    sm = i2f(seq_matches)
+    a = math_ceil((20.0 + log2f(length) + log2f(1.0 + length / bs)) / sm / 8.0)
+    b = math_ceil((20.0 + log2f(1.0 + length / bs)) / 8.0)
+    checksum_len = f2i(a)
+    if f2i(b) > checksum_len {
+        checksum_len = f2i(b)
+    }
+    if checksum_len > 16 {
+        checksum_len = 16
+    }
+    if checksum_len < 4 {
+        checksum_len = 4
+    }
+    return seq_matches, rsum_len, checksum_len
+}
+
+log2f(x: float) -> float {
+    return math_log(x) / math_log(2.0)
+}
+
+// Generate the .zsync content. Returns (bytes, length) — the binary
+// table contains NUL bytes, so callers MUST use the returned length (not
+// strlen-based string_length) when writing or comparing.
+generate_n(data: string, data_len: int, blocksize: int, filename: string, mtime: string, url: string) -> (string, int) {
+    out = generate(data, data_len, blocksize, filename, mtime, url)
+    nblocks = (data_len + blocksize - 1) / blocksize
+    sm, rsum_len, cksum_len = determine_hash_lengths(data_len, blocksize)
+    head = build_header(data_len, blocksize, sm, rsum_len, cksum_len, filename, mtime, url)
+    total = string_length(head) + nblocks * (rsum_len + cksum_len)
+    return out, total
+}
+
+// Build just the header text (ASCII, no NULs).
+build_header(data_len: int, blocksize: int, sm: int, rsum_len: int, cksum_len: int, filename: string, mtime: string, url: string) -> string {
+    sha1, e = cryptography.sha1_hex("", 0)   // placeholder; replaced below
+    head = ""
+    head = cat(head, "zsync: ")
+    head = cat(head, VERSION())
+    head = cat(head, "\n")
+    if filename != "" {
+        head = cat(head, "Filename: ")
+        head = cat(head, filename)
+        head = cat(head, "\n")
+        if mtime != "" {
+            head = cat(head, "MTime: ")
+            head = cat(head, mtime)
+            head = cat(head, "\n")
+        }
+    }
+    head = cat(head, "Blocksize: ")
+    head = cat(head, int_str(blocksize))
+    head = cat(head, "\nLength: ")
+    head = cat(head, int_str(data_len))
+    head = cat(head, "\nHash-Lengths: ")
+    head = cat(head, int_str(sm))
+    head = cat(head, ",")
+    head = cat(head, int_str(rsum_len))
+    head = cat(head, ",")
+    head = cat(head, int_str(cksum_len))
+    head = cat(head, "\nSHA-1: ")
+    head = cat(head, "0000000000000000000000000000000000000000")  // 40-char placeholder, same length as real
+    head = cat(head, "\n")
+    if url != "" {
+        head = cat(head, "URL: ")
+        head = cat(head, url)
+        head = cat(head, "\n")
+    }
+    head = cat(head, "\n")
+    return head
+}
+
+generate(data: string, data_len: int, blocksize: int, filename: string, mtime: string, url: string) -> string {
+    nblocks = (data_len + blocksize - 1) / blocksize
+
+    sm, rsum_len, cksum_len = determine_hash_lengths(data_len, blocksize)
+
+    // Whole-file SHA-1 (over the real bytes, not padded blocks).
+    sha1, e = cryptography.sha1_hex(data, data_len)
+
+    // --- headers ---
+    head = ""
+    head = cat(head, "zsync: ")
+    head = cat(head, VERSION())
+    head = cat(head, "\n")
+    if filename != "" {
+        head = cat(head, "Filename: ")
+        head = cat(head, filename)
+        head = cat(head, "\n")
+        if mtime != "" {
+            head = cat(head, "MTime: ")
+            head = cat(head, mtime)
+            head = cat(head, "\n")
+        }
+    }
+    head = cat(head, "Blocksize: ")
+    head = cat(head, int_str(blocksize))
+    head = cat(head, "\nLength: ")
+    head = cat(head, int_str(data_len))
+    head = cat(head, "\nHash-Lengths: ")
+    head = cat(head, int_str(sm))
+    head = cat(head, ",")
+    head = cat(head, int_str(rsum_len))
+    head = cat(head, ",")
+    head = cat(head, int_str(cksum_len))
+    head = cat(head, "\nSHA-1: ")
+    head = cat(head, sha1)
+    head = cat(head, "\n")
+    if url != "" {
+        head = cat(head, "URL: ")
+        head = cat(head, url)
+        head = cat(head, "\n")
+    }
+    head = cat(head, "\n")   // blank line ends headers
+
+    // --- binary checksum table ---
+    // Build into a byte buffer (binary-safe): each block contributes
+    // rsum_len bytes (BE, low bytes of the 4-byte A<<16|B) + cksum_len
+    // bytes of MD4.
+    head_len = string_length(head)
+    table_len = nblocks * (rsum_len + cksum_len)
+    total = head_len + table_len
+    buf = fileio.buf_alloc(total)
+
+    // copy headers
+    i = 0
+    while i < head_len {
+        fileio.buf_set(buf, i, string_char_at_n(head, head_len, i) & 0xff)
+        i = i + 1
+    }
+
+    bp = head_len
+    blk = 0
+    while blk < nblocks {
+        off = blk * blocksize
+        // last block may be short -> zero-pad to blocksize for checksums
+        block = block_at(data, data_len, off, blocksize)
+        r = checksums.calc_rsum_block(block, blocksize, 0, blocksize)
+        // 32-bit value A<<16 | B; write its low rsum_len bytes big-endian
+        // (i.e. the rightmost rsum_len bytes of the 4-byte field).
+        rv = ((checksums.rsum_a(r) & 0xffff) << 16) | (checksums.rsum_b(r) & 0xffff)
+        j = 0
+        while j < rsum_len {
+            // byte j (0=most significant of the emitted run) =
+            // (rv >> 8*(rsum_len-1-j)) & 0xff
+            sh = 8 * (rsum_len - 1 - j)
+            fileio.buf_set(buf, bp, (rv >> sh) & 0xff)
+            bp = bp + 1
+            j = j + 1
+        }
+
+        md = checksums.calc_checksum(block, blocksize)
+        k = 0
+        while k < cksum_len {
+            fileio.buf_set(buf, bp, string_char_at_n(md, 16, k) & 0xff)
+            bp = bp + 1
+            k = k + 1
+        }
+        blk = blk + 1
+    }
+
+    return fileio.buf_to_str(buf, total)
+}
+
+// Extract block at `off` of `blocksize` bytes, zero-padded if short.
+block_at(data: string, data_len: int, off: int, blocksize: int) -> string {
+    avail = data_len - off
+    if avail >= blocksize {
+        return fileio.slice(data, data_len, off, blocksize)
+    }
+    return fileio.pad_block(data, data_len, off, avail, blocksize)
+}
+
+cat(a: string, b: string) -> string {
+    return string_concat(a, b)
+}
+
+int_str(v: int) -> string {
+    return string_from_int(v)
+}

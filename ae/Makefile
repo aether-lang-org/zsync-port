@@ -36,6 +36,11 @@ build/%: rcksum/%.ae $(C_OBJS)
 	$(AETHERC) $< build/$*.c
 	$(CC) build/$*.c $(C_OBJS) $(CFLAGS_AE) -o $@
 
+build/%: cmd/%.ae $(C_OBJS)
+	@mkdir -p build
+	$(AETHERC) $< build/$*.c
+	$(CC) build/$*.c $(C_OBJS) $(CFLAGS_AE) -o $@
+
 build/%: zsync/%.ae $(C_OBJS)
 	@mkdir -p build
 	$(AETHERC) $< build/$*.c
@@ -53,7 +58,10 @@ test-control: build/control_test
 test-state: build/download_test
 	./build/download_test
 
-test: test-pure test-fileio test-rcksum test-control test-state
+test-mk: build/zsyncmake_test
+	./build/zsyncmake_test
+
+test: test-pure test-fileio test-rcksum test-control test-state test-mk
 
 clean:
 	rm -f rcksum/*.o build/*
