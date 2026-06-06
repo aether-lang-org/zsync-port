@@ -83,6 +83,26 @@ original Go implementation:
 - `zsyncmake` output is **byte-for-byte identical** to the Go tool, MTime
   header included.
 
+### Interoperability with the original C/Go zsync
+
+Verified by building the Go `zsync`/`zsyncmake` from this repo's pre-port
+history and cross-testing every meaningful combination. (Note: classic
+zsync has **no dedicated server** — the "server" is any plain HTTP host that
+supports `Range`. So "their server" means a standard Range-capable HTTP
+server; our `fileserver` is one such, and is also handy for tests.)
+
+| Case | Result |
+|------|--------|
+| `.zsync` produced by Aether `zsyncmake` vs Go `zsyncmake` | **byte-identical** — full format interop both directions |
+| Aether client → Aether `fileserver` | OK (this is `make itest`) |
+| **Go client → Aether `fileserver`** | **OK** — Go zsync downloads + verifies through our server |
+| **Aether client → standard Range-capable HTTP server** | **OK** — works against any conformant host (Apache/nginx/…) |
+| Either client → an HTTP server that ignores `Range` (returns 200) | both fail **identically** ("expected 206/partial content, got 200") — not an Aether issue; the host must support `Range` |
+
+Bottom line: the two implementations are **wire-compatible** — same `.zsync`
+format, same HTTP `Range`/`206` protocol. You can mix and match clients,
+generators, and servers freely.
+
 Porting it surfaced three gaps in Aether's stdlib, all filed and now landed
 in Aether ≥ 0.218 — see
 [aether-lang-org/aether](https://github.com/aether-lang-org/aether):
