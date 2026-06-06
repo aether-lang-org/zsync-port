@@ -1,0 +1,115 @@
+// SPDX-FileCopyrightText: 2004,2005,2007,2009,2025,2026 Colin Phipps <cph@moria.org.uk>
+// SPDX-License-Identifier: Artistic-2.0
+//
+// Port of the download core of cmd/zsync/main.go — the HTTP-client half.
+// Fetches the .zsync control file and the missing byte ranges over HTTP
+// (using std.http.client v2 Range requests), driving the download State.
+
+import std.string (*)
+import std.fs
+import std.http.client
+import zsync.control
+import zsync.download
+import rcksum.fileio
+
+// Fetch a URL's full body. Returns (body, length, err). Binary-safe.
+http_get(url: string) -> (string, int, string) {
+    req = client.request("GET", url)
+    client.set_header(req, "User-Agent", "zsync-aether/0.7.1")
+    resp, err = client.send_request(req)
+    client.request_free(req)
+    if err != "" {
+        return "", 0, err
+    }
+    status = client.response_status(resp)
+    if status != 200 {
+        client.response_free(resp)
+        return "", 0, concat3("http status ", int_str(status), "")
+    }
+    n = client.response_body_length(resp)
+    body = client.response_body(resp)
+    owned = copy_bytes(body, n)
+    client.response_free(resp)
+    return owned, n, ""
+}
+
+// Fetch a byte range [start, fin] of a URL via a Range request.
+// Expects 206 Partial Content. Returns (body, length, err).
+http_get_range(url: string, start: int, fin: int) -> (string, int, string) {
+    req = client.request("GET", url)
+    client.set_header(req, "User-Agent", "zsync-aether/0.7.1")
+    client.set_header(req, "Range", range_header(start, fin))
+    resp, err = client.send_request(req)
+    client.request_free(req)
+    if err != "" {
+        return "", 0, err
+    }
+    status = client.response_status(resp)
+    if status != 206 {
+        client.response_free(resp)
+        return "", 0, concat3("expected 206, got ", int_str(status), "")
+    }
+    n = client.response_body_length(resp)
+    body = client.response_body(resp)
+    owned = copy_bytes(body, n)
+    client.response_free(resp)
+    return owned, n, ""
+}
+
+// "bytes=START-FIN"
+range_header(start: int, fin: int) -> string {
+    return concat3("bytes=", int_str(start), concat3("-", int_str(fin), ""))
+}
+
+// Copy n bytes of a (possibly borrowed) body into an owned buffer so it
+// survives response_free. Binary-safe.
+copy_bytes(body: string, n: int) -> string {
+    b = fileio.buf_alloc(n)
+    i = 0
+    while i < n {
+        fileio.buf_set(b, i, string_char_at_n(body, n, i) & 0xff)
+        i = i + 1
+    }
+    return fileio.buf_to_str(b, n)
+}
+
+// Read the control file from a local path if it exists, else HTTP GET.
+fetch_control(source: string) -> (string, int, string) {
+    if fs.exists(source) == 1 {
+        data, n, e = fs.read_binary(source)
+        return data, n, e
+    }
+    return http_get(source)
+}
+
+// Fetch all the missing byte ranges of the download from `url` and feed
+// them into the State. Returns "" on success, error string otherwise.
+fetch_remaining(st: ptr, url: string) -> string {
+    while download.status(st) < 2 {
+        needed = download.needed_byte_ranges(st)
+        nn = download.br_count(needed)
+        if nn == 0 {
+            return ""
+        }
+        i = 0
+        while i < nn {
+            rstart = download.br_at_start(needed, i)
+            rfin = download.br_at_fin(needed, i)
+            chunk, clen, e = http_get_range(url, rstart, rfin)
+            if e != "" {
+                return e
+            }
+            download.submit_target_data(st, rstart, chunk, clen)
+            i = i + 1
+        }
+    }
+    return ""
+}
+
+concat3(a: string, b: string, c: string) -> string {
+    return string_concat(string_concat(a, b), c)
+}
+
+int_str(v: int) -> string {
+    return string_from_int(v)
+}

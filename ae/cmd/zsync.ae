@@ -1,0 +1,160 @@
+// SPDX-FileCopyrightText: 2004,2005,2007,2009,2025,2026 Colin Phipps <cph@moria.org.uk>
+// SPDX-License-Identifier: Artistic-2.0
+//
+// zsync client entry point. Downloads a file described by a .zsync
+// control file, reusing local data (seed files) and fetching only the
+// missing byte ranges over HTTP. Thin CLI over cmd.clientlib.
+//
+// Usage: zsync [-o output] [-i seedfile] <url-or-path-to-.zsync>
+
+import std.string (*)
+import std.os (*)
+import std.fs
+import std.http.client
+import zsync.control
+import zsync.download
+import cmd.clientlib
+import rcksum.fileio
+
+main() {
+    argc = aether_args_count()
+    out = ""
+    seed = ""
+    source = ""
+    i = 1
+    while i < argc {
+        a = aether_args_get(i)
+        if string_equals(a, "-o") == 1 {
+            i = i + 1
+            out = aether_args_get(i)
+        } else if string_equals(a, "-i") == 1 {
+            i = i + 1
+            seed = aether_args_get(i)
+        } else {
+            source = a
+        }
+        i = i + 1
+    }
+
+    if string_equals(source, "") == 1 {
+        println("usage: zsync [-o output] [-i seedfile] <.zsync url-or-path>")
+        exit(3)
+    }
+
+    // 1. fetch + parse the control file
+    cbytes, clen, cerr = clientlib.fetch_control(source)
+    if cerr != "" {
+        println("failed to fetch control file: ${cerr}")
+        exit(3)
+    }
+    ctl = control.parse(cbytes, clen)
+    if control.ctl_ok(ctl) == 0 {
+        println("failed to parse control file: ${control.ctl_err(ctl)}")
+        exit(3)
+    }
+
+    // 2. pick output filename
+    if string_equals(out, "") == 1 {
+        out = control.ctl_filename(ctl)
+        if string_equals(out, "") == 1 {
+            out = "zsync-download"
+        }
+    }
+
+    // 3. open the output file & state
+    fd = fileio.open_rw(out)
+    if fd < 0 {
+        println("cannot open output ${out}")
+        exit(1)
+    }
+    st = download.new_state(ctl, fd)
+
+    // 4. seed from local data, if given (and from the existing output)
+    if string_equals(seed, "") == 0 {
+        if fs.exists(seed) == 1 {
+            sdata, slen, se = fs.read_binary(seed)
+            if se == "" {
+                download.submit_source(st, sdata, slen)
+            }
+        }
+    }
+
+    // 5. fetch the missing ranges from the first URL in the control file
+    url = first_url(ctl, source)
+    if string_equals(url, "") == 1 {
+        println("no download URL known")
+        exit(3)
+    }
+    ferr = clientlib.fetch_remaining(st, url)
+    if ferr != "" {
+        println("download failed: ${ferr}")
+        exit(3)
+    }
+
+    // 6. finalize + verify
+    cerr2 = download.complete(st)
+    fileio.close_fd(fd)
+    if cerr2 != "" {
+        println("verification failed: ${cerr2}")
+        exit(2)
+    }
+    got, total = download.progress(st)
+    println("download complete: ${out}")
+}
+
+// Resolve the download URL. Uses the first URL header; if it is
+// relative and `source` is an http URL, resolve against source's dir.
+first_url(ctl: ptr, source: string) -> string {
+    urls = control.ctl_urls(ctl)
+    if urls == null {
+        return ""
+    }
+    n = url_count(urls)
+    if n == 0 {
+        return ""
+    }
+    u = url_at(urls, 0)
+    if is_abs(u) == 1 {
+        return u
+    }
+    // relative: resolve against source's directory
+    return join_url(source, u)
+}
+
+extern list_size(l: ptr) -> int
+extern list_get_raw(l: ptr, i: int) -> ptr
+
+url_count(l: ptr) -> int {
+    return list_size(l)
+}
+
+url_at(l: ptr, i: int) -> string {
+    return fileio.buf_as_string(list_get_raw(l, i))
+}
+
+is_abs(u: string) -> int {
+    if string_starts_with(u, "http://") == 1 {
+        return 1
+    }
+    if string_starts_with(u, "https://") == 1 {
+        return 1
+    }
+    return 0
+}
+
+// Replace the last path component of `base` with `rel`.
+join_url(base: string, rel: string) -> string {
+    n = string_length(base)
+    last = 0 - 1
+    i = 0
+    while i < n {
+        if (string_char_at(base, i) & 0xff) == 47 {
+            last = i
+        }
+        i = i + 1
+    }
+    if last < 0 {
+        return rel
+    }
+    return string_concat(string_substring(base, 0, last + 1), rel)
+}

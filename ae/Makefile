@@ -63,5 +63,12 @@ test-mk: build/zsyncmake_test
 
 test: test-pure test-fileio test-rcksum test-control test-state test-mk
 
+# The three shipping binaries.
+bins: build/zsync build/zsyncmake build/fileserver
+
+# Full end-to-end integration test (client + native server over HTTP).
+itest: bins
+	./itest/run.sh
+
 clean:
 	rm -f rcksum/*.o build/*

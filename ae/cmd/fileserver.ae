@@ -1,0 +1,154 @@
+// SPDX-FileCopyrightText: 2026 Colin Phipps <cph@moria.org.uk>
+// SPDX-License-Identifier: Artistic-2.0
+//
+// Minimal native HTTP file server for zsync integration tests, built on
+// std.http's server. Serves files from a base directory WITH real
+// Range/206 support — std.http's serve_static currently ignores the
+// Range header and always returns 200 + the whole file (it only uses
+// Range to disable the sendfile fast path). zsync requires 206 partial
+// content, so this handler parses Range and slices the file itself.
+//
+// Usage: fileserver <port> <base-dir>
+
+import std.string (*)
+import std.http (*)
+import std.os (*)
+import std.fs
+import rcksum.fileio
+
+extern malloc(size: int) -> ptr
+
+struct Ctx { base: string }
+
+ctx_as_ptr(c: *Ctx) -> ptr {
+    return c
+}
+
+@c_callback
+serve_handler(req: ptr, res: ptr, ud: ptr) {
+    ctx = ud as *Ctx
+    path = http_request_path(req)
+    // Map request path under base dir (path starts with '/').
+    full = string_concat(ctx.base, path)
+
+    if fs.exists(full) == 0 {
+        http_response_set_status(res, 404)
+        http_response_set_body(res, "not found")
+        return
+    }
+
+    size, szerr = fs.size(full)
+    fd = fileio.open_ro(full)
+    if fd < 0 {
+        http_response_set_status(res, 500)
+        http_response_set_body(res, "open failed")
+        return
+    }
+
+    rangeval = http_get_header(req, "Range")
+    if is_blank(rangeval) == 1 {
+        // Full content.
+        body, n = fileio.read_at(fd, size, 0)
+        http_response_set_status(res, 200)
+        http_response_set_header(res, "Accept-Ranges", "bytes")
+        http_response_set_body_n(res, body, n)
+        fileio.close_fd(fd)
+        return
+    }
+
+    // Parse "bytes=START-FIN".
+    start, fin, ok = parse_range(rangeval, size)
+    if ok == 0 {
+        http_response_set_status(res, 416)
+        http_response_set_body(res, "bad range")
+        fileio.close_fd(fd)
+        return
+    }
+    len = fin - start + 1
+    body, n = fileio.read_at(fd, len, start)
+    http_response_set_status(res, 206)
+    http_response_set_header(res, "Accept-Ranges", "bytes")
+    http_response_set_header(res, "Content-Range", content_range(start, fin, size))
+    http_response_set_body_n(res, body, n)
+    fileio.close_fd(fd)
+}
+
+// Parse "bytes=START-FIN" against a known file size. Returns
+// (start, fin, ok). Clamps fin to size-1.
+parse_range(h: string, size: int) -> (int, int, int) {
+    // strip "bytes="
+    if string_starts_with(h, "bytes=") == 0 {
+        return 0, 0, 0
+    }
+    body = string_substring(h, 6, string_length(h))
+    dash = string_index_of(body, "-")
+    if dash < 0 {
+        return 0, 0, 0
+    }
+    start_s = string_substring(body, 0, dash)
+    fin_s = string_substring(body, dash + 1, string_length(body))
+    start = parse_num(start_s)
+    fin = 0
+    if string_equals(fin_s, "") == 1 {
+        fin = size - 1
+    } else {
+        fin = parse_num(fin_s)
+    }
+    if fin >= size {
+        fin = size - 1
+    }
+    if start < 0 {
+        return 0, 0, 0
+    }
+    if start > fin {
+        return 0, 0, 0
+    }
+    return start, fin, 1
+}
+
+content_range(start: int, fin: int, size: int) -> string {
+    out = string_concat("bytes ", string_from_int(start))
+    out = string_concat(out, "-")
+    out = string_concat(out, string_from_int(fin))
+    out = string_concat(out, "/")
+    out = string_concat(out, string_from_int(size))
+    return out
+}
+
+// True if a header value is missing/empty (it may come back as null or
+// "" for an absent header).
+is_blank(s: string) -> int {
+    if s == null {
+        return 1
+    }
+    if string_equals(s, "") == 1 {
+        return 1
+    }
+    return 0
+}
+
+parse_num(s: string) -> int {
+    ok = string_try_long(s)
+    if ok == 0 { return 0 }
+    return string_get_long(s)
+}
+
+main() {
+    argc = aether_args_count()
+    if argc < 3 {
+        println("usage: fileserver <port> <base-dir>")
+        exit(2)
+    }
+    port = parse_num(aether_args_get(1))
+    base = aether_args_get(2)
+
+    craw = malloc(16)
+    ctx = craw as *Ctx
+    ctx.base = base
+
+    server = http_server_create(port)
+    http_server_set_host(server, "127.0.0.1")
+    http_server_get(server, "/*", serve_handler, ctx_as_ptr(ctx))
+    println("fileserver on 127.0.0.1:${port} serving ${base}")
+    server_start(server)
+}
