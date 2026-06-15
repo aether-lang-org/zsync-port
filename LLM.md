@@ -19,11 +19,21 @@ both ways (Artistic-2.0 §7/§8): aeb may link a zsync `.so`.
   untouched, your parity oracle.
 - Origin: `git@github.com:aether-lang-org/zsync-port.git`. `main` is default.
 
-## Build / test — USE build/ae, not the installed one
+## Build / test — Makefile (ae) OR aeb
 
-**`/home/paul/scm/aether/build/ae` (0.218+), NOT `/usr/local/bin/ae`.**
-Installed one is older and lacks MD4 etc. The Makefile already points `AE`
-at build/ae.
+**Makefile path:** `/home/paul/scm/aether/build/ae`, the dev tree. (Historically
+"NOT /usr/local/bin/ae — lacks MD4". That note is now STALE: installed Aether
+≥0.256 HAS md4_hex (#637 landed ≥0.218). Either works for the Makefile; the
+Makefile pins `AE` at build/ae for stability.)
+
+**aeb path (2026-06):** zsync now also builds with aeb — `aeb cmd/zsync/.build.ae`
+(+ zsyncmake/fileserver). aeb compiles each module `aetherc --emit=lib` (stricter
+than the Makefile's whole-program compile). Build against the INSTALLED Aether
+(`/usr/local/bin/ae`), which has the nested include layout aeb wants — building
+against the dev TREE currently hits an aeb include-threading gap (aether_panic.h
+not found; filed as aeb asks/aether-program-dev-tree-include-threading.md). aeb
+is a build TOOL here — it does NOT relicense the Artistic-2.0 output (see top).
+server_dsl_example is pre-broken (DSL closure form) in `make` too — not aeb's fault.
 
 - `make test` → 7 test files, ~94 asserts, all parity-checked vs Go. Green = good.
 - `make bins` → build/{zsync,zsyncmake,fileserver,server_dsl_example}.
