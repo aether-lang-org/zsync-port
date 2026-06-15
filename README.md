@@ -86,9 +86,8 @@ install -D man/zsync.1 man/zsyncmake.1 /usr/local/man/man1/
 
 ## Status & handoff
 
-This is a **complete, working port of the core protocol**, intended to land
-under `aether/std/http/zsync`. Everything is parity-tested against the
-original Go implementation:
+This is a **complete, working port of the core protocol**. Everything is
+parity-tested against the original Go implementation:
 
 - `make test` → 7 test files, 94 assertions, all green. Reference values
   (rsums, MD4s, reconstructed-file SHA-1s) are generated from the actual Go

@@ -7,8 +7,13 @@ mid-task. Re-read at session start.
 
 Pure-Aether port of zsync (rsync-over-HTTP: download a file fetching only
 the changed blocks). ~3.4k lines Aether + one small C shim. Ported by a
-sibling Claude in ~4h, parity-gated against the original Go. Destined for
-`aether/std/http/zsync`. Stays Artistic-2.0 (NOT MIT) — so no aeocha/aeb dep.
+sibling Claude in ~4h, parity-gated against the original Go. Artistic-2.0 (NOT
+MIT). Keep zsync's import graph free of aeocha/aeb *modules* — but that's an
+import-graph rule, NOT an artifact-license one: a build TOOL (aeb, like make or
+gcc) doesn't relicense the output, so zsync could be built BY aeb and stay
+Artistic. What's forbidden is `import`ing MIT aeb/aeocha modules into Artistic
+zsync source — and aeb vendoring zsync *source* the other way. Linking is fine
+both ways (Artistic-2.0 §7/§8): aeb may link a zsync `.so`.
 
 - `main` = the Aether port (this). `legacy_golang` = pristine original Go,
   untouched, your parity oracle.
