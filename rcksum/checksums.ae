@@ -102,7 +102,11 @@ byte_at(data: string, data_len: int, i: int) -> int {
 //   else : hash ^= (rs1.A & rsum_a_mask) << 16
 // Result is a uint32; mask to 32 bits.
 calc_rhash_from_rsums(rs1: *RSum, rs2: *RSum, seq_matches: int, rsum_a_mask: int) -> int {
-    hash = rs1.b
+    // `hash` is explicitly int (32-bit): every assignment is masked to 32 bits
+    // and the result is returned as int. The annotation makes the narrowing
+    // explicit so the module compiles standalone under `aetherc --emit=lib`
+    // (aeb's per-module path), not only whole-program. Value-identical.
+    int hash = rs1.b
     if seq_matches > 1 {
         hash = hash ^ ((rs2.b << 16) & 0xffffffff)
     } else {

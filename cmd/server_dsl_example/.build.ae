@@ -1,0 +1,14 @@
+// SPDX-FileCopyrightText: 2026 Colin Phipps <cph@moria.org.uk>
+// SPDX-License-Identifier: Artistic-2.0
+//
+// aeb build for the closure-DSL server example (config-IS-code surface).
+import build
+import aether
+import aether (source, output)
+main() {
+    b = build.start()
+    aether.program(b) {
+        source("../server_dsl_example.ae")
+        output("server_dsl_example")
+    }
+}

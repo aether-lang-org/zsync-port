@@ -92,11 +92,11 @@ submit_source(s: *State, data: string, data_len: int) {
 needed_byte_ranges(s: *State) -> ptr {
     block_ranges = rcksum.needed_block_ranges_p(s.rs)
     out = list_new()
-    n = rcksum.ranges_list_len(block_ranges)
+    n = rcksum.block_ranges_len(block_ranges)
     i = 0
     while i < n {
-        bstart = rcksum.ranges_list_start(block_ranges, i)
-        bend = rcksum.ranges_list_fin(block_ranges, i)
+        bstart = rcksum.block_ranges_start(block_ranges, i)
+        bend = rcksum.block_ranges_fin(block_ranges, i)
         rstart = bstart * s.blocksize
         rend = (bend + 1) * s.blocksize - 1
         if rend >= s.filelen {

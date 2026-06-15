@@ -197,15 +197,18 @@ needed_block_ranges_p(z: ptr) -> ptr {
 
 // Accessors over a needed-block-ranges list (list of *BlockPair),
 // delegating to ranges so callers don't name the BlockPair type.
-ranges_list_len(l: ptr) -> int {
+// Named `block_ranges_*` (not `ranges_list_*`) because the latter flattens to
+// the same symbol as the imported `ranges.list_len` under `aetherc --emit=lib`
+// (aeb's per-module path) → E1001 collision. block_ranges_* is collision-free.
+block_ranges_len(l: ptr) -> int {
     return ranges.list_len(l)
 }
 
-ranges_list_start(l: ptr, i: int) -> int {
+block_ranges_start(l: ptr, i: int) -> int {
     return ranges.pair_start(ranges.list_pair(l, i))
 }
 
-ranges_list_fin(l: ptr, i: int) -> int {
+block_ranges_fin(l: ptr, i: int) -> int {
     return ranges.pair_fin(ranges.list_pair(l, i))
 }
 

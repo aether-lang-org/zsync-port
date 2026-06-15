@@ -1,0 +1,21 @@
+// SPDX-FileCopyrightText: 2026 Colin Phipps <cph@moria.org.uk>
+// SPDX-License-Identifier: Artistic-2.0
+//
+// aeb build for the `zsync` client binary. Replaces the Makefile's
+// `build/zsync` rule: aetherc compiles cmd/zsync.ae (+ its transitive
+// imports zsync.control / zsync.download / cmd.clientlib / rcksum.*) and
+// links the positional-I/O C shim rcksum/fileio.c via extra_source().
+// aeb is a build TOOL here (like make/gcc) — it does not relicense the
+// Artistic-2.0 output. See LLM.md.
+import build
+import aether
+import aether (source, output, extra_source)
+
+main() {
+    b = build.start()
+    aether.program(b) {
+        source("../zsync.ae")
+        extra_source("../../rcksum/fileio.c")
+        output("zsync")
+    }
+}
