@@ -286,9 +286,13 @@ write). `check_supplied_filename` in `cmd/clientlib.ae`, unit-tested.)*
 13. **Live progress meter.** Go printed a running percent / MB-per-second
     line as ranges arrived. `-q`/`-v` exist and `-v` prints final hash
     stats, but there's no live throughput display.
-14. **`zsyncmake` stdin input.** Go read from stdin when given no file
-    (that path actually panicked on a nil mtime — a real Go bug);
-    this port requires a file argument.
+
+*(Done: **`zsyncmake` stdin input** — with no file argument `zsyncmake` now
+reads the input from stdin and writes the `.zsync` to stdout (or `-o`/`<-f>.zsync`
+if given). stdin has no mtime, so the `MTime:` header is simply omitted —
+which also *fixes* the real Go bug where the stdin path dereferenced a nil
+`FileInfo.ModTime()` and panicked. Byte-identical to the file path modulo
+MTime; an itest step asserts this.)*
 
 ## Use
 

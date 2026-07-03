@@ -156,9 +156,19 @@ self-contained workaround in-tree meanwhile (the shim model).
 Core protocol is complete + byte-verified + interop-tested both directions.
 Outstanding = perf/polish, not algorithm: HTTP/2, TLS-skip (needs upstream
 client feature), proxy, server-side 304 for `-k`, `-u`-for-local-.zsync,
-random URL failover, live progress meter, zsyncmake stdin. (old-file backup is
-a documented design divergence — in-place reconstruction consumes the old
-bytes as seed, so no pre-write `.zs-old`.) README has the prioritised list.
+random URL failover, live progress meter. (old-file backup is a documented
+design divergence — in-place reconstruction consumes the old bytes as seed, so
+no pre-write `.zs-old`.) README has the prioritised list.
+
+- **DONE: zsyncmake stdin.** cmd/zsyncmake.ae: no file arg → read_stdin()
+  (loop io.fd_read_n(0, 64k) into a std.bytes growable buf, bytes.finish →
+  binary-safe string) and write the .zsync to stdout via io.fd_write_n(1, …,
+  len) (length-explicit — the table has NULs). Output goes to stdout only when
+  neither -o nor -f is given (else -o / <fname>.zsync, matching Go). stdin has
+  no mtime → no MTime header (this is ALSO the fix for Go's stdin panic on
+  nil FileInfo.ModTime). -v goes to stderr so it can't corrupt a stdout
+  .zsync. itest has a stdin-vs-file parity step (strip MTime with python, NOT
+  grep — grep mangles the binary .zsync).
 
 - **DONE: checkSuppliedFilename (-k guard).** cmd/clientlib.ae
   `check_supplied_filename(path)` (called in main before any control write):

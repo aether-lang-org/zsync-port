@@ -41,6 +41,22 @@ cp "$WORK/data.bin" "$WORK/srv/data.bin"
     -u "http://127.0.0.1:$PORT/data.bin" -f data.bin "$WORK/data.bin" \
     || fail "zsyncmake"
 
+# 2b. zsyncmake stdin path: generating from stdin must match the file
+#     output modulo the MTime header (stdin has no mtime).
+"$BIN/zsyncmake" -b 1024 -o "$WORK/stdin.zsync" \
+    -u "http://127.0.0.1:$PORT/data.bin" -f data.bin < "$WORK/data.bin" \
+    || fail "zsyncmake stdin"
+# Strip the MTime header line for comparison. The .zsync is binary (the
+# checksum table has NULs), so use Python, not grep, to avoid mangling.
+python3 - "$WORK/srv/data.bin.zsync" "$WORK/file_nomtime.zsync" <<'PY'
+import sys
+data = open(sys.argv[1], 'rb').read()
+out = b'\n'.join(l for l in data.split(b'\n') if not l.startswith(b'MTime: '))
+open(sys.argv[2], 'wb').write(out)
+PY
+cmp -s "$WORK/file_nomtime.zsync" "$WORK/stdin.zsync" \
+    || fail "zsyncmake stdin output differs from file output (beyond MTime)"
+
 # 3. partial seed: original with the first 2048 bytes perturbed.
 python3 - "$WORK/data.bin" "$WORK/seed.bin" <<'PY'
 import sys
@@ -62,3 +78,4 @@ sleep 2
 cmp -s "$WORK/data.bin" "$WORK/out.bin" || fail "output differs from original"
 
 echo "PASS: pure-Aether zsync downloaded + reconstructed via HTTP Range (5000 bytes, SHA-1 verified)"
+echo "PASS: zsyncmake stdin path matches file output (modulo MTime)"

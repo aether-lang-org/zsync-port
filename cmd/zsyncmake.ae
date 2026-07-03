@@ -6,6 +6,8 @@
 import std.string (*)
 import std.os (*)
 import std.fs
+import std.io
+import std.bytes
 import cmd.mklib
 import rcksum.fileio
 
@@ -53,15 +55,29 @@ main() {
         i = i + 1
     }
 
+    // Input: a named file, or stdin when no file argument is given
+    // (matching the Go tool). mtime is only known for a real file — for
+    // stdin we leave it empty, so no MTime header is written (this is
+    // also the correct behaviour Go's stdin path got wrong: it read a nil
+    // FileInfo's ModTime and panicked).
+    is_stdin = 0
+    data = ""
+    dlen = 0
+    mtime = ""
     if string_equals(input, "") == 1 {
-        println("usage: zsyncmake [-b N] [-o out] [-u url] [-f name] [-v] [-V] input")
-        exit(2)
-    }
-
-    data, dlen, e = fs.read_binary(input)
-    if e != "" {
-        println("open: ${e}")
-        exit(2)
+        is_stdin = 1
+        data, dlen = read_stdin()
+    } else {
+        de = ""
+        data, dlen, de = fs.read_binary(input)
+        if de != "" {
+            println("open: ${de}")
+            exit(2)
+        }
+        epoch, merr = fs.mtime(input)
+        if merr == "" {
+            mtime = fileio.rfc1123z(epoch)
+        }
     }
 
     if blocksize == 0 {
@@ -71,30 +87,58 @@ main() {
             blocksize = 4096
         }
     }
-    if fname == "" {
+    if fname == "" && is_stdin == 0 {
         fname = basename(input)
     }
+    // Output: -o, else <fname>.zsync when a filename is known, else stdout
+    // (the stdin-with-no-name case). Matches Go.
     if string_equals(out, "") == 1 {
-        out = string_concat(fname, ".zsync")
-    }
-
-    // MTime header from the input file's mtime (RFC1123Z, UTC), matching
-    // the Go tool. Only emitted when we have a filename (same as Go).
-    mtime = ""
-    epoch, merr = fs.mtime(input)
-    if merr == "" {
-        mtime = fileio.rfc1123z(epoch)
+        if string_equals(fname, "") == 0 {
+            out = string_concat(fname, ".zsync")
+        }
     }
 
     content, clen = mklib.generate_n(data, dlen, blocksize, fname, mtime, url)
-    werr = fs.write_binary(out, content, clen)
-    if werr != "" {
-        println("write: ${werr}")
-        exit(2)
+
+    if string_equals(out, "") == 1 {
+        // write the (binary) control file to stdout, length-explicit so
+        // the checksum table's NUL bytes survive
+        if io.fd_write_n(1, content, clen) != 0 {
+            println("write: stdout")
+            exit(2)
+        }
+    } else {
+        werr = fs.write_binary(out, content, clen)
+        if werr != "" {
+            println("write: ${werr}")
+            exit(2)
+        }
     }
     if verbose == 1 {
-        println("Created .zsync with ${dlen / blocksize} blocks")
+        // to stderr so it doesn't corrupt a stdout .zsync
+        io.stderr_write("Created .zsync with ${dlen / blocksize} blocks\n")
     }
+}
+
+// Read all of stdin (fd 0) into a binary-safe buffer. Returns (data, len).
+read_stdin() -> (string, int) {
+    buf = bytes.new(65536)
+    total = 0
+    done = 0
+    while done == 0 {
+        chunk, cnt, rerr = io.fd_read_n(0, 65536)
+        if rerr != "" {
+            io.stderr_write("read stdin: ${rerr}\n")
+            exit(2)
+        }
+        if cnt == 0 {
+            done = 1
+        } else {
+            bytes.copy_from_string(buf, total, chunk, cnt)
+            total = total + cnt
+        }
+    }
+    return bytes.finish(buf, total), total
 }
 
 parse_int_arg(s: string) -> int {
