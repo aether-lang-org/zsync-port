@@ -154,12 +154,28 @@ self-contained workaround in-tree meanwhile (the shim model).
 ## What's NOT done (full list + priority in README "What is NOT yet ported")
 
 Core protocol is complete + byte-verified + interop-tested both directions.
-Outstanding = perf/polish, not algorithm: parallel range fetch (Go did 3
-concurrent; we're sequential — highest value), HTTP/2, TLS-skip (needs
-upstream client feature), proxy, per-host auth map, server-side 304 for
-`-k`, `-u`-for-local-.zsync, random URL failover, old-file backup, mtime
-restore on output, filename least-surprise check, live progress meter,
-zsyncmake stdin. README has the prioritised list.
+Outstanding = perf/polish, not algorithm: HTTP/2, TLS-skip (needs upstream
+client feature), proxy, per-host auth map, server-side 304 for `-k`,
+`-u`-for-local-.zsync, random URL failover, old-file backup, mtime restore on
+output, filename least-surprise check, live progress meter, zsyncmake stdin.
+README has the prioritised list.
+
+- **DONE: parallel range fetch** (was the highest-value item). `cmd/zsync.ae`
+  `fetch_remaining_parallel` + Fetcher/FetchCoordinator actors. Up to 3 ranges
+  in flight (const FETCH_CONCURRENCY), mirroring Go's errgroup SetLimit(3).
+  Actor gotchas learned: **actors MUST live in the module that owns `main()`**
+  — the compiler only emits `spawn_<Actor>` for actors in the main compilation
+  unit, so they can't sit in an imported lib (that's why the actors are in
+  cmd/zsync.ae, not cmd/clientlib.ae). **State fields can't be type-annotated**
+  (`state x: ptr` is a parse error) and infer their type from the initializer,
+  so a ptr-valued field must init `= null`, NOT `= 0` (else it's `atomic_int`
+  and truncates the pointer — silent 64-bit corruption, only a C warning).
+  Buffers cross the mailbox as a raw malloc'd `ptr` (clientlib.http_get_range_raw
+  — no heap-string-tracker header, survives the message copy), retyped with
+  fileio.buf_as_string and buf_free'd inside the Coordinator. submit_target_data
+  stays serialised because only the one Coordinator mailbox calls it. Verified:
+  make test green, itest PASS, a 200KB/40-scattered-range stress run byte-
+  identical, and the error path (404) fails fast instead of hanging wait_for_idle.
 
 ## Credit / license — do not muddy
 

@@ -23,6 +23,126 @@ VERSION() -> string {
     return "0.7.1"
 }
 
+// Max byte-ranges fetched concurrently (matches the Go original's
+// errgroup SetLimit(3)).
+const FETCH_CONCURRENCY = 3
+
+// ---------------------------------------------------------------------
+// Parallel range fetching (up to FETCH_CONCURRENCY ranges in flight).
+//
+// The Go original fetched up to 3 ranges concurrently (errgroup +
+// SetLimit(3)); this mirrors that with the actor model. The HTTP fetch —
+// the blocking, parallelisable part — runs in Fetcher actors; the submit
+// back into the single-threaded download State stays serialised because
+// it happens only inside the Coordinator's one mailbox. rcksum stays
+// single-threaded exactly as its header comment promises.
+//
+// std.http.client is safe to call from multiple actors at once (per-
+// request sockets, getaddrinfo-based thread-safe DNS). On the default
+// multicore build each Fetcher's blocking GET runs on its own scheduler
+// thread, so the fetches genuinely overlap.
+//
+// (Actors must be declared in the module that owns main() — the compiler
+// only emits spawn_<Actor> for actors in the main compilation unit — so
+// this lives here rather than in cmd.clientlib.)
+// ---------------------------------------------------------------------
+
+// A range to fetch, sent to a free Fetcher. `coord` is the Coordinator
+// ref the Fetcher reports back to.
+message FetchJob { url: string, start: int, fin: int, auth: string, coord: ptr }
+
+// A completed (or failed) fetch, Fetcher -> Coordinator. `worker` is the
+// Fetcher's own ref so the Coordinator can hand it the next range.
+message FetchDone { data: ptr, len: int, offset: int, err: string, worker: ptr }
+
+// Kick off the initial wave of dispatches.
+message FetchStart {}
+
+actor Fetcher {
+    receive {
+        FetchJob(url, start, fin, auth, coord) -> {
+            buf, n, e = clientlib.http_get_range_raw(url, start, fin, auth)
+            coord ! FetchDone { data: buf, len: n, offset: start, err: e, worker: self }
+        }
+    }
+}
+
+// Owns the download State and the needed-range list. Serialises every
+// submit through its single mailbox. Keeps at most one job per Fetcher in
+// flight, dispatching the next range whenever a Fetcher reports back.
+actor FetchCoordinator {
+    state st = null
+    state ranges = null
+    state nn = 0
+    state cursor = 0
+    state url = ""
+    state auth = ""
+    state errmsg = ""
+
+    receive {
+        FetchStart() -> {
+            // Dispatch the first wave, one range per Fetcher.
+            w = 0
+            while w < FETCH_CONCURRENCY {
+                if cursor < nn {
+                    f = spawn(Fetcher())
+                    rstart = download.br_at_start(ranges, cursor)
+                    rfin = download.br_at_fin(ranges, cursor)
+                    cursor = cursor + 1
+                    f ! FetchJob { url: url, start: rstart, fin: rfin, auth: auth, coord: self }
+                }
+                w = w + 1
+            }
+        }
+        FetchDone(data, len, offset, err, worker) -> {
+            // Termination is driven by wait_for_idle (a message counts as
+            // in-flight until its handler returns, and each Fetcher's GET
+            // runs synchronously inside its handler), so no pending counter
+            // is needed — dropping dispatch on error lets in-flight drain.
+            if err != "" {
+                if string_equals(errmsg, "") == 1 {
+                    errmsg = err
+                }
+            } else {
+                // Serialised submit into the single-threaded State.
+                download.submit_target_data(st, offset, fileio.buf_as_string(data), len)
+                fileio.buf_free(data)
+            }
+            // On success with work left, re-use this worker for the next
+            // range. On error, stop dispatching and let in-flight drain.
+            if string_equals(errmsg, "") == 1 {
+                if cursor < nn {
+                    rstart = download.br_at_start(ranges, cursor)
+                    rfin = download.br_at_fin(ranges, cursor)
+                    cursor = cursor + 1
+                    worker ! FetchJob { url: url, start: rstart, fin: rfin, auth: auth, coord: self }
+                }
+            }
+        }
+    }
+}
+
+// Fetch all missing byte ranges from `url`, up to FETCH_CONCURRENCY at a
+// time. Returns "" on success, an error string otherwise.
+fetch_remaining_parallel(st: ptr, url: string, auth: string) -> string {
+    needed = download.needed_byte_ranges(st)
+    nn = download.br_count(needed)
+    if nn == 0 {
+        return ""
+    }
+
+    coord = spawn(FetchCoordinator())
+    coord.st = st
+    coord.ranges = needed
+    coord.nn = nn
+    coord.url = url
+    coord.auth = auth
+    coord ! FetchStart {}
+    wait_for_idle()
+
+    return coord.errmsg
+}
+
 main() {
     argc = aether_args_count()
     out = ""
@@ -197,7 +317,7 @@ fetch_from_urls(st: ptr, ctl: ptr, source: string, auth: string, quiet: int) -> 
         if quiet == 0 {
             println("downloading new blocks from ${u}")
         }
-        e = clientlib.fetch_remaining(st, u, auth)
+        e = fetch_remaining_parallel(st, u, auth)
         if e == "" {
             return ""
         }

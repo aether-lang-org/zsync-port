@@ -222,11 +222,14 @@ deployment, and UX/defensive polish, not algorithm gaps. Roughly in
 priority order:
 
 **Performance**
-1. **Parallel range fetching.** Go fetched up to 3 ranges concurrently
-   (`errgroup` + `SetLimit(3)`); this port fetches ranges **sequentially**.
-   Biggest real-world speed difference.
-2. **HTTP/2.** Go set `ForceAttemptHTTP2`; this port uses whatever
+1. **HTTP/2.** Go set `ForceAttemptHTTP2`; this port uses whatever
    `std.http.client` negotiates (HTTP/1.1 today).
+
+*(Done: **parallel range fetching** — like Go's `errgroup` + `SetLimit(3)`,
+the client now fetches up to 3 ranges concurrently. The HTTP fetches run in
+Fetcher actors; the submit back into the single-threaded reconstruction State
+stays serialised inside one Coordinator actor's mailbox. See
+`fetch_remaining_parallel` in `cmd/zsync.ae`.)*
 
 **Real-world hosting / networking**
 3. **`--no-check-certificate`.** Accepted but a **no-op** — `std.http.client`
