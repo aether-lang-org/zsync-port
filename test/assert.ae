@@ -60,6 +60,15 @@ eq_str(h: *Harness, got: string, want: string, name: string) {
     }
 }
 
+// Record a failure and stop the run immediately. Use when continuing would
+// dereference missing data (e.g. a fixture file that didn't load) and crash
+// with no diagnostic — bail readably instead.
+fatal(h: *Harness, name: string) {
+    h.failed = h.failed + 1
+    println("  FAIL ${name}")
+    report(h)
+}
+
 // Final tally. Exits 1 if any assert failed so the run is a usable gate.
 report(h: *Harness) {
     total = h.passed + h.failed

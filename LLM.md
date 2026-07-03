@@ -41,6 +41,16 @@ server_dsl_example is pre-broken (DSL closure form) in `make` too — not aeb's 
   sandbox disabled). Prints PASS.
 - Pure-Aether leaf tests run via `ae run`; anything touching the C shim goes
   aetherc→cc→link (the Makefile's `build/%` rules do this).
+- **Test fixtures are COMMITTED in `test/fixtures/`** (`ctltest.dat` +
+  `.zsync`, `go_ref.zsync`, `go_mtime.txt`). control/download/zsyncmake tests
+  read them by RELATIVE path (`test/fixtures/…`), so run from the repo root
+  (make does). They used to be hand-made in `/tmp` — a wiped `/tmp` made those
+  three tests read null buffers and **segfault before any assert printed**
+  (looked like a protocol regression; wasn't). If they ever go missing again a
+  test now fails readably (`assert.fatal`) instead of crashing. `ctltest.dat`
+  is the same LCG the itest uses (seed 12345) → SHA-1 f5d0ac38…, the value
+  hardcoded in control/download tests. Regenerate: `test/fixtures/regen.sh`
+  (needs `go` + the `legacy_golang` branch).
 - Regenerate a Go oracle: `git archive legacy_golang | tar -x -C /tmp/go &&
   cd /tmp/go && go build -buildvcs=false -o /tmp/go_zsync ./cmd/zsync` (etc).
 
@@ -123,6 +133,23 @@ server_dsl_example is pre-broken (DSL closure form) in `make` too — not aeb's 
 gap: file it on aether-lang-org/aether with a concrete spec (API shape,
 call-site census, rationale) — that flow turns around same-day. Keep a
 self-contained workaround in-tree meanwhile (the shim model).
+
+- **#644 streaming HTTP request bodies — LANDED ≥0.347 (PR #990), NO consumer
+  in zsync yet.** Filed as the future-blocker for a zsync *write/upload*
+  receive-path (multi-MB uploads without buffering the whole body in RAM).
+  zsync has no such path today — the servers (`fileserver`, `serverdsl`) are
+  Range *download* servers, and `fileio.c`'s `pwrite` is the client's local
+  scatter-write, not HTTP. So this closed as pure bookkeeping; wire it in only
+  if/when an upload receiver is built. Then: handler dispatches at
+  headers-complete once the body > 16 KiB; loop `http.request_body_read(req,
+  off, 65536)` (blocks on the wire), terminate on
+  `http.request_body_complete(req)`, `fileio`/`fs.pwrite` each window to disk.
+  `http.request_body(req)` still works whole-body (materializes on demand) but
+  DON'T mix it with `request_body_read` on the same req (returns ""). Chunked
+  `Transfer-Encoding` request bodies remain unsupported upstream. Lineage:
+  #626 asked, #642 shipped the API surface, #644 did the parse-loop reshape.
+  (Still NOT landed: TLS-verify-skip toggle → `--no-check-certificate` stays a
+  no-op.)
 
 ## What's NOT done (full list + priority in README "What is NOT yet ported")
 

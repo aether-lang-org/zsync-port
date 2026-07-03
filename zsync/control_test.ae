@@ -21,9 +21,14 @@ main() {
     h = assert.new()
 
     // read the .zsync control file (binary-safe)
-    zbytes, zlen, zerr = fs.read_binary("/tmp/ctltest.dat.zsync")
+    zbytes, zlen, zerr = fs.read_binary("test/fixtures/ctltest.dat.zsync")
     assert.eq_str(h, zerr, "", "read .zsync: no error")
     assert.ok(h, zlen > 0, ".zsync non-empty")
+    // Bail before dereferencing a null buffer if the fixture didn't load
+    // (missing/unreadable) — a readable failure, not a segfault.
+    if zerr != "" || zlen <= 0 {
+        assert.fatal(h, "fixture test/fixtures/ctltest.dat.zsync unavailable")
+    }
 
     c = control.parse(zbytes, zlen)
     assert.eq_int(h, control.ctl_ok(c), 1, "parse ok")
@@ -42,8 +47,11 @@ main() {
     assert.ok(h, fd >= 0, "output opened")
     rcksum.set_target_fd_p(rs, fd)
 
-    seed, slen, serr = fs.read_binary("/tmp/ctltest.dat")
+    seed, slen, serr = fs.read_binary("test/fixtures/ctltest.dat")
     assert.eq_str(h, serr, "", "read seed: no error")
+    if serr != "" {
+        assert.fatal(h, "fixture test/fixtures/ctltest.dat unavailable")
+    }
     rcksum.submit_source_buffer_p(rs, seed, slen)
 
     todo = rcksum.blocks_todo_p(rs)

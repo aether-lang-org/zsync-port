@@ -17,12 +17,18 @@ main() {
     println("=== zsyncmake byte-parity vs Go ===")
     h = assert.new()
 
-    data, dlen, e = fs.read_binary("/tmp/ctltest.dat")
+    data, dlen, e = fs.read_binary("test/fixtures/ctltest.dat")
     assert.eq_str(h, e, "", "read input")
+    if e != "" {
+        assert.fatal(h, "fixture test/fixtures/ctltest.dat unavailable")
+    }
 
-    mtime, me, mk = read_line("/tmp/go_mtime.txt")
-    ref, rlen, re = fs.read_binary("/tmp/go_ref.zsync")
+    mtime, me, mk = read_line("test/fixtures/go_mtime.txt")
+    ref, rlen, re = fs.read_binary("test/fixtures/go_ref.zsync")
     assert.eq_str(h, re, "", "read go reference")
+    if mk == 0 || re != "" {
+        assert.fatal(h, "fixture test/fixtures/go_ref.zsync or go_mtime.txt unavailable")
+    }
 
     out, olen = mklib.generate_n(data, dlen, 1024, "ctltest.dat", mtime, "http://example/ctltest.dat")
 

@@ -18,7 +18,10 @@ main() {
     println("=== State full client flow (no HTTP) ===")
     h = assert.new()
 
-    zb, zl, ze = fs.read_binary("/tmp/ctltest.dat.zsync")
+    zb, zl, ze = fs.read_binary("test/fixtures/ctltest.dat.zsync")
+    if ze != "" || zl <= 0 {
+        assert.fatal(h, "fixture test/fixtures/ctltest.dat.zsync unavailable")
+    }
     c = control.parse(zb, zl)
     assert.eq_int(h, control.ctl_ok(c), 1, "parse ok")
 
@@ -30,7 +33,10 @@ main() {
 
     // Seed: the original file with its first 2048 bytes (blocks 0,1)
     // zeroed out -> those blocks won't match, the rest will.
-    orig, olen, oe = fs.read_binary("/tmp/ctltest.dat")
+    orig, olen, oe = fs.read_binary("test/fixtures/ctltest.dat")
+    if oe != "" {
+        assert.fatal(h, "fixture test/fixtures/ctltest.dat unavailable")
+    }
     seed = fileio.zero_prefix(orig, olen, 2048)
     download.submit_source(s, seed, olen)
 
