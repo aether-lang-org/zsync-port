@@ -284,9 +284,11 @@ source-derived name is used. `resolve_output_name` / `base_name` /
 overwrite an existing non-`.zsync` file with the control-file copy unless its
 first bytes are `zsync:` (catches `-k` aimed at the wrong file before any
 write). `check_supplied_filename` in `cmd/clientlib.ae`, unit-tested.)*
-13. **Live progress meter.** Go printed a running percent / MB-per-second
-    line as ranges arrived. `-q`/`-v` exist and `-v` prints final hash
-    stats, but there's no live throughput display.
+*(Done: **live progress meter** — like Go, a `\r`-overwritten
+`<elapsed>s <rate> <pct>% of target obtained` line is printed to stderr as
+ranges arrive (from the fetch Coordinator, so it works with the parallel
+fetch), suppressed by `-q`. `clientlib.progress_line` (integer-only
+formatting, unit-tested), `std.os.now_monotonic_ms` for elapsed/rate.)*
 
 *(Done: **`zsyncmake` stdin input** — with no file argument `zsyncmake` now
 reads the input from stdin and writes the `.zsync` to stdout (or `-o`/`<-f>.zsync`

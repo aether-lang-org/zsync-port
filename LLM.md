@@ -162,11 +162,21 @@ self-contained workaround in-tree meanwhile (the shim model).
 ## What's NOT done (full list + priority in README "What is NOT yet ported")
 
 Core protocol is complete + byte-verified + interop-tested both directions.
-Outstanding = perf/polish, not algorithm: HTTP/2, TLS-skip (needs upstream
-client feature), proxy, server-side 304 for `-k`, `-u`-for-local-.zsync,
-random URL failover, live progress meter. (old-file backup is a documented
-design divergence — in-place reconstruction consumes the old bytes as seed, so
-no pre-write `.zs-old`.) README has the prioritised list.
+Outstanding = perf/polish, not algorithm: HTTP/2 (divergence), TLS-skip +
+proxy (both blocked on upstream #1012), server-side 304 for `-k`,
+`-u`-for-local-.zsync, random URL failover (divergence). (old-file backup is a
+documented design divergence — in-place reconstruction consumes the old bytes
+as seed, so no pre-write `.zs-old`.) README has the prioritised list. **The
+self-contained client/zsyncmake polish is now all done** — what's left is
+either upstream-blocked or an intentional divergence.
+
+- **DONE: live progress meter.** cmd/zsync.ae Coordinator prints a
+  `\r`-overwritten `<elapsed>s <KB/s> <pct>% of target obtained` line to
+  STDERR on each successful FetchDone (so it works with parallel fetch),
+  suppressed by -q; final `\n` in fetch_remaining_parallel. Formatting is
+  clientlib.progress_line (integer-only — float→string is awkward; KB/s + 1dp
+  elapsed/pct, unit-tested). Elapsed/rate via std.os.now_monotonic_ms (a real
+  clock IS available in compiled binaries — the Date.now ban is workflow-only).
 
 - **DONE: zsyncmake stdin.** cmd/zsyncmake.ae: no file arg → read_stdin()
   (loop io.fd_read_n(0, 64k) into a std.bytes growable buf, bytes.finish →

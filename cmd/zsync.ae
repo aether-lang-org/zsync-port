@@ -12,6 +12,7 @@
 import std.string (*)
 import std.list (*)
 import std.os (*)
+import std.io
 import std.fs
 import std.http.client
 import zsync.control
@@ -78,6 +79,8 @@ actor FetchCoordinator {
     state url = ""
     state auth = ""
     state errmsg = ""
+    state quiet = 1
+    state start_ms = 0
 
     receive {
         FetchStart() -> {
@@ -107,6 +110,12 @@ actor FetchCoordinator {
                 // Serialised submit into the single-threaded State.
                 download.submit_target_data(st, offset, fileio.buf_as_string(data), len)
                 fileio.buf_free(data)
+                // Live progress line (stderr, \r-overwritten) as ranges land.
+                if quiet == 0 {
+                    got, total = download.progress(st)
+                    elapsed = now_monotonic_ms() - start_ms
+                    io.stderr_write(clientlib.progress_line(got, total, elapsed))
+                }
             }
             // On success with work left, re-use this worker for the next
             // range. On error, stop dispatching and let in-flight drain.
@@ -123,8 +132,9 @@ actor FetchCoordinator {
 }
 
 // Fetch all missing byte ranges from `url`, up to FETCH_CONCURRENCY at a
-// time. Returns "" on success, an error string otherwise.
-fetch_remaining_parallel(st: ptr, url: string, auth: string) -> string {
+// time. Returns "" on success, an error string otherwise. When quiet==0 a
+// live progress line is printed to stderr as ranges arrive.
+fetch_remaining_parallel(st: ptr, url: string, auth: string, quiet: int) -> string {
     needed = download.needed_byte_ranges(st)
     nn = download.br_count(needed)
     if nn == 0 {
@@ -137,9 +147,15 @@ fetch_remaining_parallel(st: ptr, url: string, auth: string) -> string {
     coord.nn = nn
     coord.url = url
     coord.auth = auth
+    coord.quiet = quiet
+    coord.start_ms = now_monotonic_ms()
     coord ! FetchStart {}
     wait_for_idle()
 
+    // Terminate the \r-updated progress line with a newline.
+    if quiet == 0 {
+        io.stderr_write("\n")
+    }
     return coord.errmsg
 }
 
@@ -349,7 +365,7 @@ fetch_from_urls(st: ptr, ctl: ptr, source: string, auths: ptr, quiet: int) -> st
             println("downloading new blocks from ${u}")
         }
         u_auth = clientlib.basic_auth_for(auths, u)
-        e = fetch_remaining_parallel(st, u, u_auth)
+        e = fetch_remaining_parallel(st, u, u_auth, quiet)
         if e == "" {
             return ""
         }

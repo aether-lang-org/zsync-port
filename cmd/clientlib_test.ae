@@ -103,5 +103,19 @@ main() {
     kres = clientlib.check_supplied_filename(badpath)
     assert.ok(h, string_equals(kres, "") == 0, "ksup: non-control file -> refused (non-empty err)")
 
+    // --- progress line formatting ---
+    // 50% of a 2000-byte target in 1000ms -> 1000 bytes, 1 KB/s, 50.0%.
+    assert.eq_str(h, clientlib.progress_line(1000, 2000, 1000),
+        "\r1.0s 1 KB/s 50.0% of target obtained   ", "progress: 50% mid-download")
+    // Complete: 100.0%.
+    assert.eq_str(h, clientlib.progress_line(2000, 2000, 500),
+        "\r0.5s 4 KB/s 100.0% of target obtained   ", "progress: 100% complete")
+    // Guard against divide-by-zero (total 0, elapsed 0).
+    assert.eq_str(h, clientlib.progress_line(0, 0, 0),
+        "\r0.0s 0 KB/s 0.0% of target obtained   ", "progress: zero guards")
+    // one-decimal helpers.
+    assert.eq_str(h, clientlib.one_dp(3450), "3.4", "one_dp: 3450ms -> 3.4s")
+    assert.eq_str(h, clientlib.one_dp_pct(427), "42.7", "one_dp_pct: 427 -> 42.7")
+
     assert.report(h)
 }

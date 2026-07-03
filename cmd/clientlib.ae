@@ -395,3 +395,33 @@ concat3(a: string, b: string, c: string) -> string {
 int_str(v: int) -> string {
     return string_from_int(v)
 }
+
+// --- Live progress line -----------------------------------------------
+// "\r<elapsed>s <rate> <pct>% of target obtained" — printed to stderr as
+// ranges arrive (mirrors Go's meter). Integer math throughout (float->
+// string is awkward in Aether): rate in KB/s, elapsed and pct to 1 dp.
+progress_line(got: int, total: int, elapsed_ms: int) -> string {
+    pct10 = 0
+    if total > 0 {
+        pct10 = (got * 1000) / total    // percent * 10
+    }
+    kbps = 0
+    if elapsed_ms > 0 {
+        kbps = got / elapsed_ms          // bytes/ms == KB/s
+    }
+    return concat3(
+        concat3("\r", one_dp(elapsed_ms), "s "),
+        concat3(int_str(kbps), " KB/s ", one_dp_pct(pct10)),
+        "% of target obtained   ")
+}
+
+// Render tenths-of-a-percent (e.g. 427 -> "42.7").
+one_dp_pct(x10: int) -> string {
+    return concat3(int_str(x10 / 10), ".", int_str(x10 - (x10 / 10) * 10))
+}
+
+// Render milliseconds as seconds with one decimal (e.g. 3450 -> "3.4").
+one_dp(ms: int) -> string {
+    tenths = ms / 100
+    return concat3(int_str(tenths / 10), ".", int_str(tenths - (tenths / 10) * 10))
+}
