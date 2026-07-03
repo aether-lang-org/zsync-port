@@ -181,7 +181,8 @@ main() {
         } else if string_equals(a, "--no-check-certificate") == 1 {
             // Accepted for CLI compatibility. The std.http client does
             // not yet expose a TLS-verify-skip toggle, so this is a
-            // no-op today (TODO: wire when the client gains the option).
+            // no-op today. Wire it up when aether#1012 (per-connection
+            // insecure mode) lands upstream.
         } else {
             source = a
         }

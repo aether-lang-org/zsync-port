@@ -134,6 +134,14 @@ gap: file it on aether-lang-org/aether with a concrete spec (API shape,
 call-site census, rationale) — that flow turns around same-day. Keep a
 self-contained workaround in-tree meanwhile (the shim model).
 
+- **#1012 client per-connection TLS-verify-skip (insecure) + forward-proxy —
+  OPEN, blocks `--no-check-certificate` and proxy.** std.http.client hardcodes
+  SSL_VERIFY_PEER (aether_http.c:204) + hostname pin (:668-670) on a shared
+  process-wide SSL_CTX, with no caller toggle; must be relaxed per-connection
+  (SSL_set_verify(ssl, SSL_VERIFY_NONE) after SSL_new, skip set1_host) not on
+  the shared ctx. Proposed `client.set_insecure(req, 1)`. Until it lands,
+  `--no-check-certificate` is a parsed no-op and there's no proxy support.
+
 - **#644 streaming HTTP request bodies — LANDED ≥0.347 (PR #990), NO consumer
   in zsync yet.** Filed as the future-blocker for a zsync *write/upload*
   receive-path (multi-MB uploads without buffering the whole body in RAM).

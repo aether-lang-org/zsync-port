@@ -234,11 +234,12 @@ stays serialised inside one Coordinator actor's mailbox. See
 **Real-world hosting / networking**
 3. **`--no-check-certificate`.** Accepted but a **no-op** — `std.http.client`
    has no TLS-verify-skip toggle yet, so HTTPS hosts with self-signed certs
-   won't work. Needs a new upstream Aether client feature (file a 4th issue),
-   then wire it. Note: the original Go integration tests *depended* on this
-   (they ran Apache with a self-signed cert).
+   won't work. **Blocked on upstream aether#1012** (per-connection insecure
+   mode); wire it up when that lands. Note: the original Go integration tests
+   *depended* on this (they ran Apache with a self-signed cert).
 4. **HTTP proxy support.** Go honoured `HTTP_PROXY`/`HTTPS_PROXY`
-   (`http.ProxyFromEnvironment`); this port does not. (Go had a tinyproxy
+   (`http.ProxyFromEnvironment`); this port does not. **Blocked on upstream
+   aether#1012** (forward-proxy in the client). (Go had a tinyproxy
    integration test for it.)
 6. **`-k` resume via server `304`.** The client correctly sends
    `If-Modified-Since` and handles a `304`, but the bundled `fileserver`
