@@ -207,12 +207,12 @@ main() {
         exit(3)
     }
 
-    // 2. output filename
+    // 2. output filename. With no -o, derive it from the control file's
+    //    Filename: header, but NEVER trust it verbatim — strip any path
+    //    component (anti-traversal) and apply the least-surprise prefix
+    //    check against the source name. See resolve_output_name.
     if string_equals(out, "") == 1 {
-        out = control.ctl_filename(ctl)
-        if string_equals(out, "") == 1 {
-            out = "zsync-download"
-        }
+        out = clientlib.resolve_output_name(control.ctl_filename(ctl), source, quiet)
     }
 
     fd = fileio.open_rw(out)
@@ -405,6 +405,7 @@ last_slash(s: string) -> int {
     }
     return last
 }
+
 
 // Copy an argv string so it survives in the seeds list.
 str_owned(s: string) -> string {

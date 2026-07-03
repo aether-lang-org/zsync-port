@@ -106,6 +106,88 @@ str_dup(s: string) -> string {
     return string_concat(s, "")
 }
 
+// --- Output-filename resolution (least-surprise + anti-traversal) ------
+// Mirrors Go's getFilename: a server-controlled Filename: header is NEVER
+// trusted verbatim.
+
+// The final path component of `s` — everything after the last '/' or '\'.
+// This is the anti-traversal strip: a remote "../../etc/passwd" becomes
+// "passwd". Mirrors Go's filepath.Base for the security-relevant case.
+base_name(s: string) -> string {
+    n = string_length(s)
+    last = 0 - 1
+    i = 0
+    while i < n {
+        c = string_char_at(s, i) & 0xff
+        if c == 47 || c == 92 {   // '/' or '\'
+            last = i
+        }
+        i = i + 1
+    }
+    return string_substring(s, last + 1, n)
+}
+
+// The source's basename with a trailing ".zsync" removed — a good guess
+// at the target filename, and the string whose prefix we least-surprise
+// against.
+source_base(source: string) -> string {
+    b = base_name(source)
+    if string_ends_with(b, ".zsync") == 1 {
+        return string_substring(b, 0, string_length(b) - 6)
+    }
+    return b
+}
+
+// Leading run of letters/digits of the source basename. Go rejects a
+// remote Filename: that doesn't start with this prefix (least surprise:
+// `foo.iso.zsync` must not yield `mbox`).
+source_prefix(source: string) -> string {
+    nb = source_base(source)
+    n = string_length(nb)
+    i = 0
+    while i < n {
+        c = string_char_at(nb, i) & 0xff
+        is_alnum = 0
+        if c >= 48 && c <= 57 { is_alnum = 1 }        // 0-9
+        if c >= 65 && c <= 90 { is_alnum = 1 }        // A-Z
+        if c >= 97 && c <= 122 { is_alnum = 1 }       // a-z
+        if is_alnum == 0 {
+            return string_substring(nb, 0, i)
+        }
+        i = i + 1
+    }
+    return nb
+}
+
+// Decide the output filename when the user gave no -o, matching Go's
+// getFilename. Never trusts the remote name verbatim. `quiet` suppresses
+// the rejection notice.
+resolve_output_name(remote: string, source: string, quiet: int) -> string {
+    if string_equals(remote, "") == 0 {
+        // 1. strip any path the remote tried to sneak in (anti-traversal)
+        name = base_name(remote)
+        // 2. accept only if it shares the source's alphanumeric prefix
+        prefix = source_prefix(source)
+        if string_equals(prefix, "") == 0 {
+            if string_starts_with(name, prefix) == 1 {
+                return name
+            }
+            if quiet == 0 {
+                println("rejected filename '${name}' from control file: prefix '${prefix}' differs")
+            }
+        } else {
+            // no usable source prefix — the stripped name is still safe
+            return name
+        }
+    }
+    // 3. fall back to the source-derived name, then a fixed default
+    sb = source_base(source)
+    if string_equals(sb, "") == 0 {
+        return sb
+    }
+    return "zsync-download"
+}
+
 // Fetch a URL's full body, optionally with an Authorization header and
 // an If-Modified-Since value. Returns (body, length, status, err) —
 // status is exposed so callers can detect 304 Not Modified.

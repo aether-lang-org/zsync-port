@@ -265,11 +265,6 @@ host). Malformed specs warn and are skipped. See `auth_map_*` / `basic_auth_for`
    reconstructs *in place*, using the existing target as a seed — the old
    bytes are consumed during reconstruction, so a pre-write `.zs-old` backup
    doesn't fit the model the way it does Go's temp-file-then-rename.)
-11. **"Principle of least surprise" filename check.** Go's `getFilename`
-    cross-checks the remote `Filename:` header against the source's filename
-    prefix and *rejects* a surprising name (anti-path-traversal + anti-
-    surprise); this port just takes `Filename:` or falls back to
-    `zsync-download`.
 12. **`checkSuppliedFilename`.** Go refused to overwrite a non-`.zsync` file
     with the `-k` copy (guards `-k` pointed at the wrong file); not ported.
 
@@ -277,6 +272,15 @@ host). Malformed specs warn and are skipped. See `auth_map_*` / `basic_auth_for`
 client stamps the downloaded file's mtime from the `.zsync` `MTime` header
 (best-effort; warns, never fatal). `fileio.set_mtime` (a `utimes` shim, since
 std.fs reads but can't set mtime) + `fileio.parse_rfc1123`.)*
+
+*(Done: **least-surprise / anti-traversal filename check** — like Go's
+`getFilename`, a server-controlled `Filename:` header is never trusted
+verbatim when no `-o` is given: any path component is stripped (so
+`../../etc/passwd` → `passwd`) and the stripped name is accepted only if it
+shares the source basename's alphanumeric prefix, else it's rejected and the
+source-derived name is used. `resolve_output_name` / `base_name` /
+`source_prefix` in `cmd/clientlib.ae`, unit-tested (incl. traversal cases) in
+`cmd/clientlib_test.ae`.)*
 13. **Live progress meter.** Go printed a running percent / MB-per-second
     line as ranges arrived. `-q`/`-v` exist and `-v` prints final hash
     stats, but there's no live throughput display.

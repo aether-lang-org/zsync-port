@@ -47,5 +47,40 @@ main() {
     empty = clientlib.auth_map_new()
     assert.eq_str(h, clientlib.basic_auth_for(empty, "http://a.example.com/x"), "", "empty map -> no auth")
 
+    // --- output filename resolution (least-surprise + anti-traversal) ---
+    q = 1  // quiet: suppress rejection notices in the test
+
+    // base_name: the anti-traversal strip (the security-critical part).
+    assert.eq_str(h, clientlib.base_name("../../etc/passwd"), "passwd", "base: unix traversal stripped")
+    assert.eq_str(h, clientlib.base_name("..\\..\\windows\\evil"), "evil", "base: windows traversal stripped")
+    assert.eq_str(h, clientlib.base_name("/abs/path/file.iso"), "file.iso", "base: absolute path stripped")
+    assert.eq_str(h, clientlib.base_name("plain.iso"), "plain.iso", "base: no path unchanged")
+
+    // A matching prefix accepts the (stripped) remote name.
+    assert.eq_str(h, clientlib.resolve_output_name("debian-15.0.iso", "https://x.org/debian-15.0.iso.zsync", q),
+        "debian-15.0.iso", "resolve: matching prefix accepted")
+
+    // A remote name that tries to escape is stripped THEN prefix-checked;
+    // "passwd" doesn't share the "debian" prefix -> rejected, fall back to
+    // the source-derived name.
+    assert.eq_str(h, clientlib.resolve_output_name("../../etc/passwd", "https://x.org/debian-15.0.iso.zsync", q),
+        "debian-15.0.iso", "resolve: traversal rejected, source name used")
+
+    // A surprising-but-harmless name (no shared prefix) is rejected too.
+    assert.eq_str(h, clientlib.resolve_output_name("mbox", "https://x.org/foo.iso.zsync", q),
+        "foo.iso", "resolve: surprising name rejected")
+
+    // Even a traversal that DID share the prefix is still path-stripped.
+    assert.eq_str(h, clientlib.resolve_output_name("../foo.iso", "https://x.org/foo.iso.zsync", q),
+        "foo.iso", "resolve: prefixed traversal still stripped")
+
+    // Empty remote name -> source-derived fallback.
+    assert.eq_str(h, clientlib.resolve_output_name("", "https://x.org/thing.zsync", q),
+        "thing", "resolve: empty remote -> source base")
+
+    // Local .zsync source works the same way.
+    assert.eq_str(h, clientlib.resolve_output_name("archive.tar", "/home/u/archive.tar.zsync", q),
+        "archive.tar", "resolve: local source, matching prefix")
+
     assert.report(h)
 }

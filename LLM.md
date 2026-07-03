@@ -156,10 +156,18 @@ self-contained workaround in-tree meanwhile (the shim model).
 Core protocol is complete + byte-verified + interop-tested both directions.
 Outstanding = perf/polish, not algorithm: HTTP/2, TLS-skip (needs upstream
 client feature), proxy, server-side 304 for `-k`, `-u`-for-local-.zsync,
-random URL failover, filename least-surprise check, live progress meter,
+random URL failover, checkSuppliedFilename (-k guard), live progress meter,
 zsyncmake stdin. (old-file backup is a documented design divergence — in-place
 reconstruction consumes the old bytes as seed, so no pre-write `.zs-old`.)
 README has the prioritised list.
+
+- **DONE: least-surprise / anti-traversal output filename.** cmd/clientlib.ae
+  `resolve_output_name(remote, source, quiet)` (+ base_name / source_base /
+  source_prefix), called from cmd/zsync.ae when no -o. A server-controlled
+  Filename: header is never trusted verbatim: strip path (../../etc/passwd →
+  passwd), accept only if it shares the source basename's alnum prefix, else
+  reject + use the source-derived name. Unit-tested incl. traversal cases;
+  security itest confirms a malicious traversal Filename does NOT escape.
 
 - **DONE: `-A` per-host auth map.** cmd/clientlib.ae `auth_map_new/add` (a
   std.map host->"user:pass"), `basic_auth_for(map, url)` (keys on `host_of(url)`
