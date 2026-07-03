@@ -26,6 +26,7 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <time.h>
+#include <sys/time.h>
 #include <string.h>
 
 /* Open for read+write, create if absent, truncate. mode 0644.
@@ -177,4 +178,17 @@ long zsync_parse_rfc1123(const char *s) {
 /* fsync to flush before close/rename. Returns 0 / -1. */
 int zsync_io_fsync(int fd) {
     return fsync(fd);
+}
+
+/* Set a file's modification time to `epoch` (Unix seconds, UTC), leaving
+ * access time at "now" — mirrors Go's os.Chtimes(path, time.Now(), mtime)
+ * used to stamp the finished download from the .zsync MTime header. std.fs
+ * can read mtime but not set it, so this is the shim. Returns 0 / -1. */
+int zsync_set_mtime(const char *path, long epoch) {
+    if (!path) return -1;
+    struct timeval tv[2];
+    gettimeofday(&tv[0], NULL);   /* atime = now */
+    tv[1].tv_sec = (time_t)epoch; /* mtime = epoch */
+    tv[1].tv_usec = 0;
+    return utimes(path, tv);
 }

@@ -251,6 +251,24 @@ main() {
         println("verification failed: ${cerr2}")
         exit(2)
     }
+    // Restore the file's mtime from the .zsync MTime header (matches Go's
+    // os.Chtimes). Best-effort: a parse/utimes failure warns, never fatal.
+    mtime_hdr = control.ctl_mtime(ctl)
+    if string_equals(mtime_hdr, "") == 0 {
+        epoch = fileio.parse_rfc1123(mtime_hdr)
+        if epoch >= 0 {
+            if fileio.set_mtime(out, epoch) != 0 {
+                if quiet == 0 {
+                    println("warning: failed to set mtime on ${out}")
+                }
+            }
+        } else {
+            if quiet == 0 {
+                println("warning: could not parse MTime header '${mtime_hdr}'")
+            }
+        }
+    }
+
     if quiet == 0 {
         println("verifying download...checksum matches OK")
         got, total = download.progress(st)

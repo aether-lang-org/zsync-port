@@ -156,9 +156,18 @@ self-contained workaround in-tree meanwhile (the shim model).
 Core protocol is complete + byte-verified + interop-tested both directions.
 Outstanding = perf/polish, not algorithm: HTTP/2, TLS-skip (needs upstream
 client feature), proxy, per-host auth map, server-side 304 for `-k`,
-`-u`-for-local-.zsync, random URL failover, old-file backup, mtime restore on
-output, filename least-surprise check, live progress meter, zsyncmake stdin.
-README has the prioritised list.
+`-u`-for-local-.zsync, random URL failover, filename least-surprise check,
+live progress meter, zsyncmake stdin. (old-file backup is a documented design
+divergence — in-place reconstruction consumes the old bytes as seed, so no
+pre-write `.zs-old`.) README has the prioritised list.
+
+- **DONE: restore mtime on finished output.** cmd/zsync.ae finalisation stamps
+  the output file's mtime from the .zsync MTime header (Go's os.Chtimes),
+  best-effort (warns, never fatal). Needed a shim — std.fs reads mtime but
+  can't set it: `fileio.set_mtime(path, epoch)` = a `utimes()` wrapper in
+  fileio.c (atime=now, mtime=epoch); header→epoch via the pre-existing
+  `fileio.parse_rfc1123`. Covered by fileio_test (RFC1123Z parse + set + read
+  back) and a network itest that asserts the output mtime == header epoch.
 
 - **DONE: parallel range fetch** (was the highest-value item). `cmd/zsync.ae`
   `fetch_remaining_parallel` + Fetcher/FetchCoordinator actors. Up to 3 ranges

@@ -6,6 +6,7 @@
 // reconstructed blocks into the output file.
 
 import std.string (*)
+import std.fs
 import rcksum.fileio
 import test.assert
 
@@ -52,5 +53,17 @@ main() {
     assert.eq_int(h, string_char_at_n(b, 3, 2) & 0xff, 98, "byte2 'b'")
 
     fileio.close_fd(fd)
+
+    // set_mtime: parse an RFC1123Z header to an epoch, stamp the file,
+    // read it back. This is the download-finalisation mtime-restore path.
+    hdr = "Wed, 01 Jan 2025 00:00:00 +0000"
+    epoch = fileio.parse_rfc1123(hdr)
+    assert.eq_int(h, epoch, 1735689600, "RFC1123Z parses to epoch")
+    rc = fileio.set_mtime(path, epoch)
+    assert.eq_int(h, rc, 0, "set_mtime returns 0")
+    back, merr = fs.mtime(path)
+    assert.eq_str(h, merr, "", "mtime read: no error")
+    assert.eq_int(h, back, 1735689600, "mtime read back matches")
+
     assert.report(h)
 }

@@ -181,6 +181,13 @@ parse_rfc1123(s: string) -> int {
     return zsync_parse_rfc1123(s)
 }
 
+// Set `path`'s modification time to `epoch` (Unix seconds, UTC). std.fs
+// can read mtime but not set it. Returns 0 on success, -1 on failure.
+extern zsync_set_mtime(path: string, epoch: long) -> int
+set_mtime(path: string, epoch: int) -> int {
+    return zsync_set_mtime(path, epoch)
+}
+
 // Persistently copy 16 bytes out of a buf into a fresh, process-lifetime
 // buffer returned as a length-16 string. Use this (not buf_to_str) for
 // values stashed into long-lived structs (target-block MD4s) — it does

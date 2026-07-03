@@ -258,9 +258,10 @@ stays serialised inside one Coordinator actor's mailbox. See
 **Finalisation / UX / defensive polish**
 9. **Old-file backup on completion.** Go renamed an existing target to
    `<name>.zs-old` (hardlink, falling back to rename) before writing the new
-   file; this port overwrites in place.
-10. **Restore mtime on the finished file.** Go ran `os.Chtimes` to set the
-    downloaded file's mtime from the `.zsync` `MTime`; not done here.
+   file; this port overwrites in place. (Design divergence: the port
+   reconstructs *in place*, using the existing target as a seed — the old
+   bytes are consumed during reconstruction, so a pre-write `.zs-old` backup
+   doesn't fit the model the way it does Go's temp-file-then-rename.)
 11. **"Principle of least surprise" filename check.** Go's `getFilename`
     cross-checks the remote `Filename:` header against the source's filename
     prefix and *rejects* a surprising name (anti-path-traversal + anti-
@@ -268,6 +269,11 @@ stays serialised inside one Coordinator actor's mailbox. See
     `zsync-download`.
 12. **`checkSuppliedFilename`.** Go refused to overwrite a non-`.zsync` file
     with the `-k` copy (guards `-k` pointed at the wrong file); not ported.
+
+*(Done: **restore mtime on the finished file** — like Go's `os.Chtimes`, the
+client stamps the downloaded file's mtime from the `.zsync` `MTime` header
+(best-effort; warns, never fatal). `fileio.set_mtime` (a `utimes` shim, since
+std.fs reads but can't set mtime) + `fileio.parse_rfc1123`.)*
 13. **Live progress meter.** Go printed a running percent / MB-per-second
     line as ranges arrived. `-q`/`-v` exist and `-v` prints final hash
     stats, but there's no live throughput display.
