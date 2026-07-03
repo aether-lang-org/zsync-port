@@ -240,9 +240,6 @@ stays serialised inside one Coordinator actor's mailbox. See
 4. **HTTP proxy support.** Go honoured `HTTP_PROXY`/`HTTPS_PROXY`
    (`http.ProxyFromEnvironment`); this port does not. (Go had a tinyproxy
    integration test for it.)
-5. **`-A` per-host auth map.** Go kept a `host=user:pass` map and applied the
-   matching credential per request host. This port applies a **single**
-   credential to all fetches and ignores the host part of `host=user:pass`.
 6. **`-k` resume via server `304`.** The client correctly sends
    `If-Modified-Since` and handles a `304`, but the bundled `fileserver`
    never returns `304`, so that path is untested end-to-end.
@@ -254,6 +251,12 @@ stays serialised inside one Coordinator actor's mailbox. See
 8. **Multi-URL failover ordering.** Go picked URLs randomly (`rand.Intn`) and
    marked failed ones; this port tries them in **deterministic order**
    (intentional — friendlier for tests — but a behaviour difference).
+
+*(Done: **`-A` per-host auth map** — like Go's `authMap`, `-A host=user:pass`
+is repeatable and each credential is applied only to requests whose host
+matches (control-file fetch and every range fetch resolve auth from the URL's
+host). Malformed specs warn and are skipped. See `auth_map_*` / `basic_auth_for`
+/ `host_of` in `cmd/clientlib.ae`, unit-tested in `cmd/clientlib_test.ae`.)*
 
 **Finalisation / UX / defensive polish**
 9. **Old-file backup on completion.** Go renamed an existing target to

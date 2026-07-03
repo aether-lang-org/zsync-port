@@ -61,7 +61,10 @@ test-state: build/download_test
 test-mk: build/zsyncmake_test
 	./build/zsyncmake_test
 
-test: test-pure test-fileio test-rcksum test-control test-state test-mk
+test-clientlib: build/clientlib_test
+	./build/clientlib_test
+
+test: test-pure test-fileio test-rcksum test-control test-state test-mk test-clientlib
 
 # The three shipping binaries.
 bins: build/zsync build/zsyncmake build/fileserver build/server_dsl_example

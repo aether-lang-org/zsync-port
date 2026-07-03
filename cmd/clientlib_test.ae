@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: 2004,2005,2007,2009,2025,2026 Colin Phipps <cph@moria.org.uk>
+// SPDX-License-Identifier: Artistic-2.0
+//
+// Unit tests for the per-host auth map (-A host=user:pass) and the URL
+// host extractor it keys on. Mirrors the Go authMap behaviour: a
+// credential applies only to requests whose host matches.
+
+import std.string (*)
+import cmd.clientlib
+import test.assert
+
+main() {
+    println("=== clientlib per-host auth ===")
+    h = assert.new()
+
+    // host_of: scheme strip, port strip, path/query/fragment cutoff.
+    assert.eq_str(h, clientlib.host_of("http://example.com/a/b.zsync"), "example.com", "host: plain")
+    assert.eq_str(h, clientlib.host_of("https://example.com/x"), "example.com", "host: https")
+    assert.eq_str(h, clientlib.host_of("http://example.com:8080/x"), "example.com", "host: port stripped")
+    assert.eq_str(h, clientlib.host_of("http://host.example.com"), "host.example.com", "host: no path")
+    assert.eq_str(h, clientlib.host_of("http://h.io:9/p?q=1"), "h.io", "host: port+query")
+    assert.eq_str(h, clientlib.host_of("http://h.io/p#frag"), "h.io", "host: fragment")
+    assert.eq_str(h, clientlib.host_of("/local/path.zsync"), "", "host: local path -> empty")
+    assert.eq_str(h, clientlib.host_of("ftp://x.com/y"), "", "host: non-http scheme -> empty")
+
+    // auth_map_add: malformed specs rejected.
+    m = clientlib.auth_map_new()
+    assert.eq_int(h, clientlib.auth_map_add(m, "noequals"), 0, "reject: no '='")
+    assert.eq_int(h, clientlib.auth_map_add(m, "host=nocolon"), 0, "reject: no ':'")
+    assert.eq_int(h, clientlib.auth_map_add(m, "=user:pass"), 0, "reject: empty host")
+
+    // Two hosts, distinct credentials (the whole point of the map).
+    assert.eq_int(h, clientlib.auth_map_add(m, "a.example.com=bob:secret"), 1, "add a.example.com")
+    assert.eq_int(h, clientlib.auth_map_add(m, "b.example.com=alice:pw123"), 1, "add b.example.com")
+
+    // Each host gets its OWN Basic header.
+    assert.eq_str(h, clientlib.basic_auth_for(m, "http://a.example.com/f.zsync"),
+        "Basic Ym9iOnNlY3JldA==", "a.example.com -> bob:secret")
+    assert.eq_str(h, clientlib.basic_auth_for(m, "https://b.example.com:443/g"),
+        "Basic YWxpY2U6cHcxMjM=", "b.example.com -> alice:pw123 (port ignored)")
+
+    // A host with NO entry gets NO auth (not some other host's cred).
+    assert.eq_str(h, clientlib.basic_auth_for(m, "http://c.example.com/x"), "", "unmatched host -> no auth")
+    // A local path (no host) gets no auth.
+    assert.eq_str(h, clientlib.basic_auth_for(m, "/local/f.zsync"), "", "local path -> no auth")
+    // Empty map -> no auth.
+    empty = clientlib.auth_map_new()
+    assert.eq_str(h, clientlib.basic_auth_for(empty, "http://a.example.com/x"), "", "empty map -> no auth")
+
+    assert.report(h)
+}

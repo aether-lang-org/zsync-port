@@ -6,6 +6,7 @@
 // (using std.http.client v2 Range requests), driving the download State.
 
 import std.string (*)
+import std.map (*)
 import std.fs
 import std.http.client
 import std.cryptography
@@ -24,6 +25,85 @@ basic_auth(creds: string) -> string {
         return ""
     }
     return string_concat("Basic ", enc)
+}
+
+// --- Per-host auth map (-A host=user:pass, repeatable) -----------------
+// Mirrors the Go original's authMap: credentials are keyed by hostname
+// and applied only to requests to that host. Stored as host -> "user:pass"
+// (the Basic header is built per request in basic_auth_for).
+
+auth_map_new() -> ptr {
+    return map_new()
+}
+
+// Add one "-A host=user:pass" entry. Silently ignores a malformed value
+// with no '=' or no ':' (Go errored; a warning is enough here — the
+// caller checks the return: 1 on success, 0 on malformed).
+auth_map_add(m: ptr, spec: string) -> int {
+    eq = string_index_of(spec, "=")
+    if eq < 0 {
+        return 0
+    }
+    host = string_substring(spec, 0, eq)
+    pair = string_substring(spec, eq + 1, string_length(spec))
+    if string_index_of(pair, ":") < 0 {
+        return 0
+    }
+    if string_equals(host, "") == 1 {
+        return 0
+    }
+    map_put_string_owned(m, host, str_dup(pair))
+    return 1
+}
+
+// The Authorization header to use for `url`, or "" if no -A entry matches
+// the URL's host. Matches Go's `if auth, ok := auths[u.Hostname()]`.
+basic_auth_for(m: ptr, url: string) -> string {
+    if m == null {
+        return ""
+    }
+    host = host_of(url)
+    if string_equals(host, "") == 1 {
+        return ""
+    }
+    if map_has(m, host) == 0 {
+        return ""
+    }
+    creds = fileio.buf_as_string(map_get_raw(m, host))
+    return basic_auth(creds)
+}
+
+// Extract the hostname (no port) from an http(s) URL, matching Go's
+// url.Hostname(). Returns "" for a non-URL (local path) or if unparseable.
+host_of(url: string) -> string {
+    rest = ""
+    if string_starts_with(url, "http://") == 1 {
+        rest = string_substring(url, 7, string_length(url))
+    } else if string_starts_with(url, "https://") == 1 {
+        rest = string_substring(url, 8, string_length(url))
+    } else {
+        return ""
+    }
+    // host[:port] ends at the first '/', '?' or '#'.
+    end = string_length(rest)
+    slash = string_index_of(rest, "/")
+    if slash >= 0 && slash < end { end = slash }
+    q = string_index_of(rest, "?")
+    if q >= 0 && q < end { end = q }
+    hh = string_index_of(rest, "#")
+    if hh >= 0 && hh < end { end = hh }
+    hostport = string_substring(rest, 0, end)
+    // strip ":port"
+    colon = string_index_of(hostport, ":")
+    if colon >= 0 {
+        return string_substring(hostport, 0, colon)
+    }
+    return hostport
+}
+
+// Owned copy of a string (so a map/list can outlive the arg buffer).
+str_dup(s: string) -> string {
+    return string_concat(s, "")
 }
 
 // Fetch a URL's full body, optionally with an Authorization header and

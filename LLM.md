@@ -155,11 +155,19 @@ self-contained workaround in-tree meanwhile (the shim model).
 
 Core protocol is complete + byte-verified + interop-tested both directions.
 Outstanding = perf/polish, not algorithm: HTTP/2, TLS-skip (needs upstream
-client feature), proxy, per-host auth map, server-side 304 for `-k`,
-`-u`-for-local-.zsync, random URL failover, filename least-surprise check,
-live progress meter, zsyncmake stdin. (old-file backup is a documented design
-divergence — in-place reconstruction consumes the old bytes as seed, so no
-pre-write `.zs-old`.) README has the prioritised list.
+client feature), proxy, server-side 304 for `-k`, `-u`-for-local-.zsync,
+random URL failover, filename least-surprise check, live progress meter,
+zsyncmake stdin. (old-file backup is a documented design divergence — in-place
+reconstruction consumes the old bytes as seed, so no pre-write `.zs-old`.)
+README has the prioritised list.
+
+- **DONE: `-A` per-host auth map.** cmd/clientlib.ae `auth_map_new/add` (a
+  std.map host->"user:pass"), `basic_auth_for(map, url)` (keys on `host_of(url)`
+  = scheme+port+path/query/frag-stripped hostname, matching Go's url.Hostname),
+  threaded through cmd/zsync.ae: control fetch + each range fetch resolve auth
+  from their URL's host. `-A` is now repeatable (was: last-wins single cred for
+  all hosts); malformed specs warn+skip. Unit-tested in cmd/clientlib_test.ae
+  (new Makefile test-clientlib target; host_of edge cases + per-host selection).
 
 - **DONE: restore mtime on finished output.** cmd/zsync.ae finalisation stamps
   the output file's mtime from the .zsync MTime header (Go's os.Chtimes),

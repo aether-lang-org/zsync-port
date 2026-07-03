@@ -147,7 +147,7 @@ main() {
     argc = aether_args_count()
     out = ""
     seeds = list_new()
-    auth_creds = ""      // "user:pass" from -A host=user:pass
+    auths = clientlib.auth_map_new()   // host -> "user:pass" from -A (repeatable)
     keep = ""            // -k path
     quiet = 0
     verbose = 0
@@ -164,7 +164,10 @@ main() {
             list_add_raw(seeds, str_owned(aether_args_get(i)))
         } else if string_equals(a, "-A") == 1 {
             i = i + 1
-            auth_creds = creds_of(aether_args_get(i))
+            spec = aether_args_get(i)
+            if clientlib.auth_map_add(auths, spec) == 0 {
+                println("warning: ignoring malformed -A '${spec}' (want host=user:pass)")
+            }
         } else if string_equals(a, "-k") == 1 {
             i = i + 1
             keep = aether_args_get(i)
@@ -190,10 +193,10 @@ main() {
         exit(3)
     }
 
-    auth = clientlib.basic_auth(auth_creds)
-
-    // 1. fetch + parse the control file (with -k If-Modified-Since reuse)
-    cbytes, clen, cerr = get_control(source, keep, auth, quiet)
+    // 1. fetch + parse the control file (with -k If-Modified-Since reuse).
+    //    The control file's auth follows the source URL's host.
+    ctl_auth = clientlib.basic_auth_for(auths, source)
+    cbytes, clen, cerr = get_control(source, keep, ctl_auth, quiet)
     if cerr != "" {
         println("failed to fetch control file: ${cerr}")
         exit(3)
@@ -238,7 +241,8 @@ main() {
     }
 
     // 4. fetch the missing ranges, trying each URL until one succeeds.
-    ferr = fetch_from_urls(st, ctl, source, auth, quiet)
+    //    Per-host auth is resolved from `auths` for each URL's host.
+    ferr = fetch_from_urls(st, ctl, source, auths, quiet)
     if ferr != "" {
         println("download failed: ${ferr}")
         exit(3)
@@ -316,7 +320,7 @@ get_control(source: string, keep: string, auth: string, quiet: int) -> (string, 
 // Try each URL in the control file (relative URLs resolved against the
 // source) until the download completes. Mirrors the Go failover, minus
 // the randomisation (deterministic order is friendlier to test).
-fetch_from_urls(st: ptr, ctl: ptr, source: string, auth: string, quiet: int) -> string {
+fetch_from_urls(st: ptr, ctl: ptr, source: string, auths: ptr, quiet: int) -> string {
     urls = control.ctl_urls(ctl)
     if urls == null {
         return "no download URLs known"
@@ -335,7 +339,8 @@ fetch_from_urls(st: ptr, ctl: ptr, source: string, auth: string, quiet: int) -> 
         if quiet == 0 {
             println("downloading new blocks from ${u}")
         }
-        e = fetch_remaining_parallel(st, u, auth)
+        u_auth = clientlib.basic_auth_for(auths, u)
+        e = fetch_remaining_parallel(st, u, u_auth)
         if e == "" {
             return ""
         }
@@ -363,16 +368,6 @@ feed_seed_if_exists(st: ptr, path: string, quiet: int) {
         println("reading seed file ${path}")
     }
     download.submit_source(st, data, n)
-}
-
-// -A value is "host=user:pass"; return "user:pass" (we apply a single
-// credential to all fetches — simplification of Go's per-host map).
-creds_of(v: string) -> string {
-    eq = string_index_of(v, "=")
-    if eq < 0 {
-        return v
-    }
-    return string_substring(v, eq + 1, string_length(v))
 }
 
 // Resolve a (possibly relative) URL from the control file against the
