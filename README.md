@@ -265,9 +265,6 @@ host). Malformed specs warn and are skipped. See `auth_map_*` / `basic_auth_for`
    reconstructs *in place*, using the existing target as a seed — the old
    bytes are consumed during reconstruction, so a pre-write `.zs-old` backup
    doesn't fit the model the way it does Go's temp-file-then-rename.)
-12. **`checkSuppliedFilename`.** Go refused to overwrite a non-`.zsync` file
-    with the `-k` copy (guards `-k` pointed at the wrong file); not ported.
-
 *(Done: **restore mtime on the finished file** — like Go's `os.Chtimes`, the
 client stamps the downloaded file's mtime from the `.zsync` `MTime` header
 (best-effort; warns, never fatal). `fileio.set_mtime` (a `utimes` shim, since
@@ -281,6 +278,11 @@ shares the source basename's alphanumeric prefix, else it's rejected and the
 source-derived name is used. `resolve_output_name` / `base_name` /
 `source_prefix` in `cmd/clientlib.ae`, unit-tested (incl. traversal cases) in
 `cmd/clientlib_test.ae`.)*
+
+*(Done: **`checkSuppliedFilename` `-k` guard** — like Go, zsync refuses to
+overwrite an existing non-`.zsync` file with the control-file copy unless its
+first bytes are `zsync:` (catches `-k` aimed at the wrong file before any
+write). `check_supplied_filename` in `cmd/clientlib.ae`, unit-tested.)*
 13. **Live progress meter.** Go printed a running percent / MB-per-second
     line as ranges arrived. `-q`/`-v` exist and `-v` prints final hash
     stats, but there's no live throughput display.

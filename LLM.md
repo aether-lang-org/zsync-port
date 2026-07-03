@@ -156,10 +156,15 @@ self-contained workaround in-tree meanwhile (the shim model).
 Core protocol is complete + byte-verified + interop-tested both directions.
 Outstanding = perf/polish, not algorithm: HTTP/2, TLS-skip (needs upstream
 client feature), proxy, server-side 304 for `-k`, `-u`-for-local-.zsync,
-random URL failover, checkSuppliedFilename (-k guard), live progress meter,
-zsyncmake stdin. (old-file backup is a documented design divergence — in-place
-reconstruction consumes the old bytes as seed, so no pre-write `.zs-old`.)
-README has the prioritised list.
+random URL failover, live progress meter, zsyncmake stdin. (old-file backup is
+a documented design divergence — in-place reconstruction consumes the old
+bytes as seed, so no pre-write `.zs-old`.) README has the prioritised list.
+
+- **DONE: checkSuppliedFilename (-k guard).** cmd/clientlib.ae
+  `check_supplied_filename(path)` (called in main before any control write):
+  refuse to clobber an existing non-.zsync file unless its first bytes are
+  "zsync:" (binary-safe has_prefix_bytes). Returns "" if safe, else an error
+  string; main prints + exit(3). Unit-tested (5 branches).
 
 - **DONE: least-surprise / anti-traversal output filename.** cmd/clientlib.ae
   `resolve_output_name(remote, source, quiet)` (+ base_name / source_base /

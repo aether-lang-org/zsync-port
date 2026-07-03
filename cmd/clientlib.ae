@@ -188,6 +188,50 @@ resolve_output_name(remote: string, source: string, quiet: int) -> string {
     return "zsync-download"
 }
 
+// Guard the -k keep path before we might overwrite it: refuse to clobber
+// an existing file that is NOT a .zsync control file (a fat-fingered
+// `-k important.txt` shouldn't destroy your data). Mirrors Go's
+// checkSuppliedFilename. Returns "" if it is safe to write `path`, else
+// an error string.
+check_supplied_filename(path: string) -> string {
+    if string_equals(path, "") == 1 {
+        return ""                          // no -k given
+    }
+    if fs.exists(path) == 0 {
+        return ""                          // new file — fine
+    }
+    if string_ends_with(path, ".zsync") == 1 {
+        return ""                          // named like a control file — assume intended
+    }
+    // Existing, non-.zsync: only OK if its first bytes are "zsync:".
+    data, n, e = fs.read_binary(path)
+    if e != "" {
+        return concat3("failed to verify that ", path, " is a zsync control file")
+    }
+    if has_prefix_bytes(data, n, "zsync:") == 0 {
+        return concat3("refusing to overwrite ", path,
+            " with a zsync control file — did you use -k on the wrong file?")
+    }
+    return ""
+}
+
+// Binary-safe "does buffer[0..] start with `pfx`?" — string_starts_with
+// is strlen-based and would misbehave on a binary first byte.
+has_prefix_bytes(data: string, n: int, pfx: string) -> int {
+    pn = string_length(pfx)
+    if n < pn {
+        return 0
+    }
+    i = 0
+    while i < pn {
+        if (string_char_at_n(data, n, i) & 0xff) != (string_char_at_n(pfx, pn, i) & 0xff) {
+            return 0
+        }
+        i = i + 1
+    }
+    return 1
+}
+
 // Fetch a URL's full body, optionally with an Authorization header and
 // an If-Modified-Since value. Returns (body, length, status, err) —
 // status is exposed so callers can detect 304 Not Modified.

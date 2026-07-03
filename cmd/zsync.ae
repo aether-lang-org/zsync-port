@@ -193,6 +193,14 @@ main() {
         exit(3)
     }
 
+    // Guard -k: refuse to overwrite a non-.zsync file with the control
+    // copy (catches `-k` aimed at the wrong file) before any write.
+    kerr = clientlib.check_supplied_filename(keep)
+    if string_equals(kerr, "") == 0 {
+        println(kerr)
+        exit(3)
+    }
+
     // 1. fetch + parse the control file (with -k If-Modified-Since reuse).
     //    The control file's auth follows the source URL's host.
     ctl_auth = clientlib.basic_auth_for(auths, source)
