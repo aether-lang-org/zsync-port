@@ -166,14 +166,26 @@ self-contained workaround in-tree meanwhile (the shim model).
 ## What's NOT done (full list + priority in README "What is NOT yet ported")
 
 Core protocol is complete + byte-verified + interop-tested both directions.
-Outstanding = perf/polish, not algorithm: HTTP/2 (UPSTREAM GAP — client is
-HTTP/1.1-only, no ALPN/h2; low value given parallel HTTP/1.1 fetch), server-
-side 304 for `-k`, `-u`-for-local-.zsync, random URL failover (divergence).
-(old-file backup is a documented design divergence — in-place reconstruction
-consumes the old bytes as seed, so no pre-write `.zs-old`.) README has the
-prioritised list. **All the self-contained client/zsyncmake polish is done, AND
-TLS-skip + proxy are now done (their #1012 blocker landed).** What's left is
-HTTP/2 (upstream gap, low value) or intentional divergences.
+Outstanding = HTTP/2 (UPSTREAM GAP — client is HTTP/1.1-only, no ALPN/h2; low
+value given parallel HTTP/1.1 fetch) and random URL failover (intentional
+divergence — deterministic order for tests). (old-file backup is a documented
+design divergence — in-place reconstruction consumes the old bytes as seed, so
+no pre-write `.zs-old`.) README has the prioritised list. **Essentially the
+whole Go feature set is now ported + tested.** What's left is HTTP/2 (upstream
+gap) or the two deliberate divergences.
+
+- **DONE: `-k` server 304 + `-u` for local .zsync + zsyncmake relative URL.**
+  (1) fileserver.ae now emits Last-Modified and answers a satisfied
+  If-Modified-Since with 304 (resolves base+request_path with a `..` guard,
+  stats mtime, compares to IMS via fileio.parse_rfc1123). Client get_control
+  stamps the saved -k copy's mtime from the response Last-Modified (returned as
+  a 5th value from http_get_auth) so reruns send accurate IMS. (2) `-u URL`
+  client flag sets the base for resolving relative URLs (was: always the
+  source; useless for a local .zsync). (3) zsyncmake with no -u now emits a
+  RELATIVE URL (input basename) + a stderr warning, like Go — without this
+  there was no relative-URL .zsync to exercise -u. Tested: make itest-304 /
+  itest-localu (and itest-all runs every suite). Server helpers has_dotdot/
+  join_path live in fileserver.ae (main module, itest-covered).
 
 - **DONE: live progress meter.** cmd/zsync.ae Coordinator prints a
   `\r`-overwritten `<elapsed>s <KB/s> <pct>% of target obtained` line to

@@ -170,6 +170,7 @@ main() {
     quiet = 0
     verbose = 0
     source = ""
+    referer = ""         // -u base URL for resolving relative URLs in a local .zsync
     insecure = 0         // --no-check-certificate
     proxy_mode = 1       // default: follow $HTTP_PROXY (Go-compatible)
     proxy_url = ""       // --proxy URL (explicit)
@@ -192,6 +193,9 @@ main() {
         } else if string_equals(a, "-k") == 1 {
             i = i + 1
             keep = aether_args_get(i)
+        } else if string_equals(a, "-u") == 1 {
+            i = i + 1
+            referer = aether_args_get(i)
         } else if string_equals(a, "-q") == 1 {
             quiet = 1
         } else if string_equals(a, "-v") == 1 {
@@ -216,7 +220,7 @@ main() {
     }
 
     if string_equals(source, "") == 1 {
-        println("usage: zsync [-o out] [-i seed]... [-A host=user:pass] [-k keep]")
+        println("usage: zsync [-o out] [-i seed]... [-A host=user:pass] [-k keep] [-u url]")
         println("             [--no-check-certificate] [--proxy URL] [--no-proxy]")
         println("             [-q] [-v] [-V] <.zsync>")
         exit(3)
@@ -283,8 +287,14 @@ main() {
     }
 
     // 4. fetch the missing ranges, trying each URL until one succeeds.
-    //    Per-host auth is resolved from `auths` for each URL's host.
-    ferr = fetch_from_urls(st, ctl, source, auths, quiet, net)
+    //    Relative URLs in the .zsync resolve against `-u` if given, else
+    //    the source. -u is what makes a *local* .zsync with relative URLs
+    //    usable (the source is then a file path, not a base URL).
+    base = source
+    if string_equals(referer, "") == 0 {
+        base = referer
+    }
+    ferr = fetch_from_urls(st, ctl, base, auths, quiet, net)
     if ferr != "" {
         println("download failed: ${ferr}")
         exit(3)
@@ -343,7 +353,7 @@ get_control(source: string, keep: string, auth: string, quiet: int, net: ptr) ->
             }
         }
     }
-    body, n, status, e = clientlib.http_get_auth(source, auth, ims, net)
+    body, n, status, lastmod, e = clientlib.http_get_auth(source, auth, ims, net)
     if status == 304 {
         if quiet == 0 {
             println("control file not modified — using local copy")
@@ -355,14 +365,25 @@ get_control(source: string, keep: string, auth: string, quiet: int, net: ptr) ->
     }
     if string_equals(keep, "") == 0 {
         fs.write_binary(keep, body, n)
+        // Stamp the saved copy's mtime from the server's Last-Modified so
+        // a rerun sends an accurate If-Modified-Since (matches Go). If the
+        // server sent none, the file keeps "now" — still yields a correct
+        // 304 for an unchanged file, just less precise.
+        if string_equals(lastmod, "") == 0 {
+            epoch2 = fileio.parse_rfc1123(lastmod)
+            if epoch2 >= 0 {
+                fileio.set_mtime(keep, epoch2)
+            }
+        }
     }
     return body, n, ""
 }
 
-// Try each URL in the control file (relative URLs resolved against the
-// source) until the download completes. Mirrors the Go failover, minus
-// the randomisation (deterministic order is friendlier to test).
-fetch_from_urls(st: ptr, ctl: ptr, source: string, auths: ptr, quiet: int, net: ptr) -> string {
+// Try each URL in the control file (relative URLs resolved against
+// `base` — the -u value or the source) until the download completes.
+// Mirrors the Go failover, minus the randomisation (deterministic order
+// is friendlier to test).
+fetch_from_urls(st: ptr, ctl: ptr, base: string, auths: ptr, quiet: int, net: ptr) -> string {
     urls = control.ctl_urls(ctl)
     if urls == null {
         return "no download URLs known"
@@ -377,7 +398,7 @@ fetch_from_urls(st: ptr, ctl: ptr, source: string, auths: ptr, quiet: int, net: 
         if download.status(st) >= 2 {
             return ""
         }
-        u = resolve(fileio.buf_as_string(list_get_raw(urls, i)), source)
+        u = resolve(fileio.buf_as_string(list_get_raw(urls, i)), base)
         if quiet == 0 {
             println("downloading new blocks from ${u}")
         }

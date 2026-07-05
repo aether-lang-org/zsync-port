@@ -90,6 +90,14 @@ main() {
     if fname == "" && is_stdin == 0 {
         fname = basename(input)
     }
+    // No -u given: include a *relative* URL (the input basename) so the
+    // .zsync is still usable when served next to the data file, matching
+    // Go. The client then needs the file served alongside it, or a `-u`
+    // base to resolve against. (Not possible for stdin — no filename.)
+    if string_equals(url, "") == 1 && is_stdin == 0 {
+        url = basename(input)
+        io.stderr_write("No URL given; including a relative URL. Serve the data file and .zsync from the same directory, or pass -u.\n")
+    }
     // Output: -o, else <fname>.zsync when a filename is known, else stdout
     // (the stdin-with-no-name case). Matches Go.
     if string_equals(out, "") == 1 {

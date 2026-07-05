@@ -83,5 +83,17 @@ itest-tls: bins
 itest-proxy: bins
 	./itest/run_proxy.sh
 
+# Conditional-GET test: fileserver Last-Modified/304 + client -k reuse
+# (needs curl).
+itest-304: bins
+	./itest/run_304.sh
+
+# -u base URL resolving a relative URL in a local .zsync (needs python3).
+itest-localu: bins
+	./itest/run_localu.sh
+
+# All integration tests (each needs network; run sandbox disabled).
+itest-all: itest itest-tls itest-proxy itest-304 itest-localu
+
 clean:
 	rm -f rcksum/*.o build/*

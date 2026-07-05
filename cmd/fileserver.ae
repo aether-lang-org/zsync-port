@@ -3,14 +3,17 @@
 //
 // Minimal native HTTP file server for zsync integration tests, built on
 // std.http. As of Aether 0.218 (#641) http.serve_static honours the
-// Range request header (206 + Content-Range), so the handler is a thin
-// wrapper — no manual range parsing needed.
+// Range request header (206 + Content-Range). On top of that this server
+// adds conditional-GET support (Last-Modified + If-Modified-Since -> 304)
+// so the client's `-k` resume path can be exercised end-to-end.
 //
 // Usage: fileserver <port> <base-dir>
 
 import std.string (*)
 import std.http (*)
 import std.os (*)
+import std.fs
+import rcksum.fileio
 
 extern malloc(size: int) -> ptr
 
@@ -23,9 +26,59 @@ ctx_as_ptr(c: *Ctx) -> ptr {
 @c_callback
 serve_handler(req: ptr, res: ptr, ud: ptr) {
     ctx = ud as *Ctx
+
+    // Resolve the served file path the way serve_static does (base +
+    // request path), with a lexical ".." guard so a conditional-GET probe
+    // can't stat outside the base dir.
+    rpath = http_request_path(req)
+    if has_dotdot(rpath) == 0 {
+        fpath = join_path(ctx.base, rpath)
+        if fs.exists(fpath) == 1 {
+            epoch, me = fs.mtime(fpath)
+            if me == "" {
+                // Advertise the file's mtime so the client can cache it.
+                http_response_set_header(res, "Last-Modified", fileio.rfc1123z(epoch))
+                // Conditional GET: 304 if the client's copy is current.
+                ims = http_get_header(req, "If-Modified-Since")
+                if string_equals(ims, "") == 0 {
+                    since = fileio.parse_rfc1123(ims)
+                    if since >= 0 && epoch <= since {
+                        http_response_set_status(res, 304)
+                        return
+                    }
+                }
+            }
+        }
+    }
+
     // serve_static maps the request path under base, sets Content-Type,
     // and honours Range -> 206 / Content-Range (Aether >= 0.218, #641).
     http_serve_static(req, res, ctx.base)
+}
+
+// Lexical "does this path contain a .. component?" guard.
+has_dotdot(p: string) -> int {
+    n = string_length(p)
+    i = 0
+    while i + 1 < n {
+        if (string_char_at(p, i) & 0xff) == 46 {          // '.'
+            if (string_char_at(p, i + 1) & 0xff) == 46 {  // '..'
+                return 1
+            }
+        }
+        i = i + 1
+    }
+    return 0
+}
+
+// Join base + request-path (request path always starts with '/').
+join_path(base: string, rpath: string) -> string {
+    if string_ends_with(base, "/") == 1 {
+        if string_starts_with(rpath, "/") == 1 {
+            return string_concat(base, string_substring(rpath, 1, string_length(rpath)))
+        }
+    }
+    return string_concat(base, rpath)
 }
 
 parse_num(s: string) -> int {

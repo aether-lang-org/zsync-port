@@ -235,14 +235,6 @@ stays serialised inside one Coordinator actor's mailbox. See
 `fetch_remaining_parallel` in `cmd/zsync.ae`.)*
 
 **Real-world hosting / networking**
-6. **`-k` resume via server `304`.** The client correctly sends
-   `If-Modified-Since` and handles a `304`, but the bundled `fileserver`
-   never returns `304`, so that path is untested end-to-end.
-7. **`-u` referer for a *local* `.zsync`.** Go's `-u` supplies the base URL
-   when you hand it a local `.zsync` so relative `URL:` entries resolve. This
-   port only resolves relative URLs against the source argument, which works
-   when the source is itself an HTTP URL but not for the local-file + `-u`
-   case.
 8. **Multi-URL failover ordering.** Go picked URLs randomly (`rand.Intn`) and
    marked failed ones; this port tries them in **deterministic order**
    (intentional — friendlier for tests — but a behaviour difference).
@@ -258,6 +250,18 @@ the flag and the download succeeds with it.)*
 `$HTTPS_PROXY`/`$NO_PROXY` (Go-compatible), via `client.use_env_proxy` /
 `use_http_proxy` (aether#1012). `make itest-proxy` routes a full download
 through an inline forward proxy and checks the proxy's request log.)*
+
+*(Done: **`-k` resume via server `304`** — `fileserver` now emits
+`Last-Modified` and answers a satisfied `If-Modified-Since` with `304`. The
+client stamps the saved `-k` copy's mtime from `Last-Modified`, so a rerun
+sends an accurate IMS and reuses the local copy on `304`. `make itest-304`
+exercises the full round trip.)*
+
+*(Done: **`-u` base URL + relative-URL `.zsync`** — `zsyncmake` with no `-u`
+now emits a relative `URL:` (the input basename, like Go), and the client's
+`-u <base>` resolves such a relative URL when the `.zsync` is a local file.
+`make itest-localu` proves a local `.zsync` fails without `-u` and downloads
+with it.)*
 
 *(Done: **`-A` per-host auth map** — like Go's `authMap`, `-A host=user:pass`
 is repeatable and each credential is applied only to requests whose host
