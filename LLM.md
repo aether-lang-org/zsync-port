@@ -134,13 +134,17 @@ gap: file it on aether-lang-org/aether with a concrete spec (API shape,
 call-site census, rationale) — that flow turns around same-day. Keep a
 self-contained workaround in-tree meanwhile (the shim model).
 
-- **#1012 client per-connection TLS-verify-skip (insecure) + forward-proxy —
-  OPEN, blocks `--no-check-certificate` and proxy.** std.http.client hardcodes
-  SSL_VERIFY_PEER (aether_http.c:204) + hostname pin (:668-670) on a shared
-  process-wide SSL_CTX, with no caller toggle; must be relaxed per-connection
-  (SSL_set_verify(ssl, SSL_VERIFY_NONE) after SSL_new, skip set1_host) not on
-  the shared ctx. Proposed `client.set_insecure(req, 1)`. Until it lands,
-  `--no-check-certificate` is a parsed no-op and there's no proxy support.
+- **#1012 client TLS-verify-skip + forward-proxy — LANDED (set_insecure 0.354,
+  proxy 0.356), now WIRED IN.** cmd/clientlib.ae has a NetOpts struct
+  {insecure, proxy_mode, proxy_url} + apply_net_opts(req, o) applied right after
+  every client.request(); threaded from main through get_control and the
+  fetch/Coordinator/FetchJob path (net: ptr in the message + coord state). CLI:
+  `--no-check-certificate` → set_insecure; `--proxy URL` → use_http_proxy;
+  `--no-proxy` → direct; DEFAULT = use_env_proxy (Go-compatible $HTTP_PROXY).
+  Tested by make itest-tls (self-signed HTTPS: rejected w/o flag, works with)
+  and itest-proxy (traffic verified through an inline forward proxy). The
+  aether client is HTTP/1.1-only still (no client ALPN/h2) — HTTP/2 is an
+  upstream gap, low value given parallel HTTP/1.1 fetch.
 
 - **#644 streaming HTTP request bodies — LANDED ≥0.347 (PR #990), NO consumer
   in zsync yet.** Filed as the future-blocker for a zsync *write/upload*
@@ -162,13 +166,14 @@ self-contained workaround in-tree meanwhile (the shim model).
 ## What's NOT done (full list + priority in README "What is NOT yet ported")
 
 Core protocol is complete + byte-verified + interop-tested both directions.
-Outstanding = perf/polish, not algorithm: HTTP/2 (divergence), TLS-skip +
-proxy (both blocked on upstream #1012), server-side 304 for `-k`,
-`-u`-for-local-.zsync, random URL failover (divergence). (old-file backup is a
-documented design divergence — in-place reconstruction consumes the old bytes
-as seed, so no pre-write `.zs-old`.) README has the prioritised list. **The
-self-contained client/zsyncmake polish is now all done** — what's left is
-either upstream-blocked or an intentional divergence.
+Outstanding = perf/polish, not algorithm: HTTP/2 (UPSTREAM GAP — client is
+HTTP/1.1-only, no ALPN/h2; low value given parallel HTTP/1.1 fetch), server-
+side 304 for `-k`, `-u`-for-local-.zsync, random URL failover (divergence).
+(old-file backup is a documented design divergence — in-place reconstruction
+consumes the old bytes as seed, so no pre-write `.zs-old`.) README has the
+prioritised list. **All the self-contained client/zsyncmake polish is done, AND
+TLS-skip + proxy are now done (their #1012 blocker landed).** What's left is
+HTTP/2 (upstream gap, low value) or intentional divergences.
 
 - **DONE: live progress meter.** cmd/zsync.ae Coordinator prints a
   `\r`-overwritten `<elapsed>s <KB/s> <pct>% of target obtained` line to

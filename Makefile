@@ -73,5 +73,15 @@ bins: build/zsync build/zsyncmake build/fileserver build/server_dsl_example
 itest: bins
 	./itest/run.sh
 
+# TLS integration test: --no-check-certificate vs a self-signed HTTPS
+# server (needs openssl + python3).
+itest-tls: bins
+	./itest/run_tls.sh
+
+# Proxy integration test: --proxy routes through a forward proxy
+# (needs python3).
+itest-proxy: bins
+	./itest/run_proxy.sh
+
 clean:
 	rm -f rcksum/*.o build/*

@@ -222,8 +222,11 @@ deployment, and UX/defensive polish, not algorithm gaps. Roughly in
 priority order:
 
 **Performance**
-1. **HTTP/2.** Go set `ForceAttemptHTTP2`; this port uses whatever
-   `std.http.client` negotiates (HTTP/1.1 today).
+1. **HTTP/2.** Go set `ForceAttemptHTTP2`. `std.http.client` is HTTP/1.1-only
+   today (no client-side ALPN or h2 framing — nghttp2 is wired into the
+   *server* only), so this is an **upstream gap**, not a port choice. Low
+   value here: HTTP/1.1 works, and parallel range fetch (3 concurrent
+   connections) already captures most of what h2 multiplexing would buy.
 
 *(Done: **parallel range fetching** — like Go's `errgroup` + `SetLimit(3)`,
 the client now fetches up to 3 ranges concurrently. The HTTP fetches run in
@@ -232,15 +235,6 @@ stays serialised inside one Coordinator actor's mailbox. See
 `fetch_remaining_parallel` in `cmd/zsync.ae`.)*
 
 **Real-world hosting / networking**
-3. **`--no-check-certificate`.** Accepted but a **no-op** — `std.http.client`
-   has no TLS-verify-skip toggle yet, so HTTPS hosts with self-signed certs
-   won't work. **Blocked on upstream aether#1012** (per-connection insecure
-   mode); wire it up when that lands. Note: the original Go integration tests
-   *depended* on this (they ran Apache with a self-signed cert).
-4. **HTTP proxy support.** Go honoured `HTTP_PROXY`/`HTTPS_PROXY`
-   (`http.ProxyFromEnvironment`); this port does not. **Blocked on upstream
-   aether#1012** (forward-proxy in the client). (Go had a tinyproxy
-   integration test for it.)
 6. **`-k` resume via server `304`.** The client correctly sends
    `If-Modified-Since` and handles a `304`, but the bundled `fileserver`
    never returns `304`, so that path is untested end-to-end.
@@ -252,6 +246,18 @@ stays serialised inside one Coordinator actor's mailbox. See
 8. **Multi-URL failover ordering.** Go picked URLs randomly (`rand.Intn`) and
    marked failed ones; this port tries them in **deterministic order**
    (intentional — friendlier for tests — but a behaviour difference).
+
+*(Done: **`--no-check-certificate`** — skips TLS peer/hostname verification
+for hosts with self-signed or untrusted certs, via `client.set_insecure`
+(aether#1012), applied per-connection to the control fetch and every range
+fetch. `make itest-tls` proves both directions: the cert is *rejected* without
+the flag and the download succeeds with it.)*
+
+*(Done: **HTTP proxy** — `--proxy URL` pins an explicit forward proxy;
+`--no-proxy` forces direct; by default the client follows `$HTTP_PROXY`/
+`$HTTPS_PROXY`/`$NO_PROXY` (Go-compatible), via `client.use_env_proxy` /
+`use_http_proxy` (aether#1012). `make itest-proxy` routes a full download
+through an inline forward proxy and checks the proxy's request log.)*
 
 *(Done: **`-A` per-host auth map** — like Go's `authMap`, `-A host=user:pass`
 is repeatable and each credential is applied only to requests whose host

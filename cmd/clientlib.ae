@@ -14,6 +14,58 @@ import zsync.control
 import zsync.download
 import rcksum.fileio
 
+extern malloc(size: int) -> ptr
+
+// Connection options applied to every request, threaded from the CLI.
+//   insecure:   1 = skip TLS peer/hostname verification (--no-check-certificate)
+//   proxy_mode: 0 = direct, 1 = follow $HTTP_PROXY etc, 2 = explicit proxy_url
+struct NetOpts {
+    insecure: int
+    proxy_mode: int
+    proxy_url: string
+}
+
+// Default: verify TLS, honour no proxy (direct). Safe baseline.
+net_opts_default() -> ptr {
+    raw = malloc(24)
+    o = raw as *NetOpts
+    o.insecure = 0
+    o.proxy_mode = 0
+    o.proxy_url = ""
+    return o
+}
+
+net_opts_set_insecure(o: ptr, on: int) {
+    s = o as *NetOpts
+    s.insecure = on
+}
+
+// mode: 1 = use environment proxy, 2 = explicit url (url ignored for mode 1).
+net_opts_set_proxy(o: ptr, mode: int, url: string) {
+    s = o as *NetOpts
+    s.proxy_mode = mode
+    s.proxy_url = str_dup(url)
+}
+
+// Apply the connection options to a freshly-built request, right after
+// client.request(...). Central place so all three request builders stay
+// in sync.
+apply_net_opts(req: ptr, o: ptr) {
+    if o == null {
+        return
+    }
+    s = o as *NetOpts
+    if s.insecure == 1 {
+        client.set_insecure(req, 1)
+    }
+    if s.proxy_mode == 1 {
+        client.use_env_proxy(req, 1)
+    } else if s.proxy_mode == 2 {
+        client.use_http_proxy(req, s.proxy_url)
+    }
+    // mode 0 (direct) is the client default — nothing to do.
+}
+
 // Build an HTTP Basic "Authorization" header value from "user:pass",
 // or "" if creds is "". Returns e.g. "Basic dXNlcjpwYXNz".
 basic_auth(creds: string) -> string {
@@ -235,8 +287,9 @@ has_prefix_bytes(data: string, n: int, pfx: string) -> int {
 // Fetch a URL's full body, optionally with an Authorization header and
 // an If-Modified-Since value. Returns (body, length, status, err) —
 // status is exposed so callers can detect 304 Not Modified.
-http_get_auth(url: string, auth: string, ims: string) -> (string, int, int, string) {
+http_get_auth(url: string, auth: string, ims: string, opts: ptr) -> (string, int, int, string) {
     req = client.request("GET", url)
+    apply_net_opts(req, opts)
     client.set_header(req, "User-Agent", "zsync-aether/0.7.1")
     if string_equals(auth, "") == 0 {
         client.set_header(req, "Authorization", auth)
@@ -265,16 +318,17 @@ http_get_auth(url: string, auth: string, ims: string) -> (string, int, int, stri
     return owned, n, 200, ""
 }
 
-// Fetch a URL's full body (no auth). Returns (body, length, err).
+// Fetch a URL's full body (no auth, direct/verified). Returns (body, length, err).
 http_get(url: string) -> (string, int, string) {
-    body, n, status, err = http_get_auth(url, "", "")
+    body, n, status, err = http_get_auth(url, "", "", null)
     return body, n, err
 }
 
 // Fetch a byte range [start, fin] of a URL via a Range request, with
 // optional auth. Expects 206 Partial Content. Returns (body, length, err).
-http_get_range_auth(url: string, start: int, fin: int, auth: string) -> (string, int, string) {
+http_get_range_auth(url: string, start: int, fin: int, auth: string, opts: ptr) -> (string, int, string) {
     req = client.request("GET", url)
+    apply_net_opts(req, opts)
     client.set_header(req, "User-Agent", "zsync-aether/0.7.1")
     client.set_header(req, "Range", range_header(start, fin))
     if string_equals(auth, "") == 0 {
@@ -298,7 +352,7 @@ http_get_range_auth(url: string, start: int, fin: int, auth: string) -> (string,
 }
 
 http_get_range(url: string, start: int, fin: int) -> (string, int, string) {
-    return http_get_range_auth(url, start, fin, "")
+    return http_get_range_auth(url, start, fin, "", null)
 }
 
 // Like http_get_range_auth but returns the body as a RAW malloc'd ptr
@@ -306,8 +360,9 @@ http_get_range(url: string, start: int, fin: int) -> (string, int, string) {
 // mailbox boundary and retyped with fileio.buf_as_string on the far side
 // without the tracker recycling it. Returns (buf, len, err); buf is null
 // on error. Caller owns buf (fileio.buf_free when done).
-http_get_range_raw(url: string, start: int, fin: int, auth: string) -> (ptr, int, string) {
+http_get_range_raw(url: string, start: int, fin: int, auth: string, opts: ptr) -> (ptr, int, string) {
     req = client.request("GET", url)
+    apply_net_opts(req, opts)
     client.set_header(req, "User-Agent", "zsync-aether/0.7.1")
     client.set_header(req, "Range", range_header(start, fin))
     if string_equals(auth, "") == 0 {
