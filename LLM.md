@@ -123,8 +123,10 @@ server_dsl_example is pre-broken (DSL closure form) in `make` too — not aeb's 
   via fileio, 206 + Content-Range, own `..` guard).
 - Client v2 (`std.http.client`): `request(m,url)` → `set_header` →
   `send_request` → `response_status`/`response_body_length`/`response_body`.
-  Range = `set_header(req,"Range","bytes=a-b")`, expect 206. No TLS-verify-
-  skip toggle yet (so `--no-check-certificate` is a no-op).
+  Range = `set_header(req,"Range","bytes=a-b")`, expect 206. TLS verification
+  skip and proxy controls are available and wired here via
+  `client.set_insecure`, `client.use_env_proxy`, `client.use_http_proxy`, and
+  the direct default (`cmd/clientlib.ae::apply_net_opts`).
 
 ## Upstream stdlib gaps this port filed (all landed ≥0.218)
 
